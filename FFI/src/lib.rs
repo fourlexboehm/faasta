@@ -18,17 +18,14 @@ pub struct RequestInfo {
     pub headers: *const KeyValuePair,
     pub headers_len: usize,
 
-    // We could store a pointer to the body bytes and its length
     pub body: *const c_uchar,
     pub body_len: usize,
 }
 
 #[repr(C)]
 pub struct ResponseInfo {
-    // Typically, we store numeric status code in a field
     pub status_code: u16,
 
-    // Pointers to allocated strings
     pub body: *const c_char,
     pub body_len: usize,
 

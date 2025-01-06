@@ -23,6 +23,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
+use cap_async_std::fs::Dir;
 use tokio::fs;
 use tower::timeout::TimeoutLayer;
 use tower::{timeout, ServiceBuilder};
@@ -36,6 +37,7 @@ type HandleRequestFn =
         Uri,
         HeaderMap,
         Bytes,
+        Dir
     ) -> Pin<Box<dyn Future<Output = Response<Body>> + Send + 'static>>;
 
 lazy_static! {
@@ -84,14 +86,19 @@ async fn handle_invoke_rs(
             LIB_CACHE.get(&function_name).unwrap()
         }
     };
-    lib.1.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // TODO computing HMAC is expensive, we should cache this or switch to blake2/3
     let hmac = "dy_".to_string() + &*generate_hmac(&*function_name);
     println!("{}", hmac);
     let handle_request: Symbol<HandleRequestFn> = unsafe { lib.0.get(hmac.as_ref()).unwrap() };
 
-    let ah = handle_request(method, uri, headers, body).await;
+    let path = format!("./sandbox/{function_name}");
+    let _ = fs::create_dir_all(&path).await;
+    let sandbox = Dir::from_std_file(async_std::fs::File::open(path).await.unwrap());
+
+    let response = handle_request(method, uri, headers, body, sandbox).await;
     println!("Function {} took {:?}", function_name, start_time.elapsed());
-    ah
+    lib.1.fetch_add(start_time.elapsed().as_millis() as usize, std::sync::atomic::Ordering::Relaxed);
+    response
 }
 #[derive(Debug)]
 struct TimeoutError {

@@ -1,10 +1,7 @@
 use crate::LIB_CACHE;
-use analyze::{analyze_cargo_file, analyze_rust_file};
 use axum::extract::Path as AxumPath;
 use axum::{extract::Multipart, http::StatusCode, response::IntoResponse};
-use bytes::Bytes;
-use futures::{Stream, TryFutureExt, TryStreamExt};
-use geiger::IncludeTests;
+use futures::{TryFutureExt, TryStreamExt};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::io::Read;
@@ -13,14 +10,14 @@ use std::{
     io,
     path::{Path, PathBuf},
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use faasta_analyze::{build_project, lint_project};
+use tokio::io::AsyncReadExt;
 use tokio::{
     fs::{self, File},
     io::BufWriter,
     process::Command,
 };
 use tokio_util::io::StreamReader;
-use uuid::Uuid;
 use zip::ZipArchive;
 
 /// Handle uploading multiple files via multipart and then `cargo build` them.
@@ -60,7 +57,6 @@ pub async fn handle_upload_and_build(
                 eprintln!("Unexpected field: {:?}", field.name());
             }
 
-            // Optional: Validate the uploaded file's filename or MIME type
             if let Some(filename) = field.file_name() {
                 if !filename.ends_with(".zip") {
                     eprintln!("Uploaded file is not a ZIP archive: {}", filename);
@@ -138,52 +134,38 @@ pub async fn handle_upload_and_build(
         Err(_) => {}
     }
 
-    // rename_entrypoint(&project_dir, &function_name)
-    //     .await
-    //     .unwrap_or_else(|e| {
-    //         eprintln!("Failed to rename entrypointin project: {}", e);
-    //         (
-    //             StatusCode::INTERNAL_SERVER_ERROR,
-    //             "Failed to sanitize project".to_owned(),
-    //         )
-    //             .into_response();
-    //     });
-    //
-    build_project(&project_dir).await.unwrap_or_else(|e| {
-        eprintln!("Failed to build project: {}", e);
-        (
+    if let Err(e) = lint_project(&project_dir).await {
+        eprintln!("Failed to lint project: {}", e);
+        return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to build project".to_owned(),
+            "Your code contains illegal symbols: ".to_owned() + &e.to_string(),
         )
             .into_response();
-    });
-
-    // Identify the compiled library
-    // Normally, the library name depends on the Cargo package name and platform.
-    // For demonstration, we assume it is named `libmycrate.so` (Linux),
-    // or we search the target folder for any `.so`/`.dll`/`.dylib`.
-    // Adjust to your real scenario.
-
-    let target_release = project_dir.join("../target/release/");
-
-    // Let's do a simple approach: look for any file that starts with `lib`
-    // and ends with `.so`, `.dll`, or `.dylib`.
-    let mut library_path = None;
-    if let Ok(mut entries) = fs::read_dir(&target_release).await {
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            let file_path = entry.path();
-            if let Some(file_name) = file_path.file_name().and_then(|s| s.to_str()) {
-                let is_shared_obj = file_name.starts_with("lib")
-                    && (file_name.ends_with(".so")
-                        || file_name.ends_with(".dll")
-                        || file_name.ends_with(".dylib"));
-                if is_shared_obj {
-                    library_path = Some(file_path);
-                    break;
-                }
-            }
-        }
     }
+
+    // Build the project
+    if let Err(e) = build_project(&project_dir).await {
+        eprintln!("Failed to build project: {}", e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to build project: ".to_owned() + &e.to_string(),
+        )
+            .into_response();
+    }
+
+    let extension = if cfg!(target_os = "linux") {
+        "so"
+    } else if cfg!(target_os = "macos") {
+        "dylib"
+    } else if cfg!(target_os = "windows") {
+        "dll"
+    } else {
+        "so"
+    };
+
+    let target_release = project_dir.join(format!("../target/release/lib{function_name}.{extension}"));
+    // stat
+    let library_path = fs::metadata(&target_release).await.map(|_| target_release).ok();
 
     let Some(lib_path) = library_path else {
         // eprintln!("No library found in release directory: {}", target_release);
@@ -230,24 +212,6 @@ pub async fn handle_upload_and_build(
         .into_response()
 }
 
-// async fn rename_entrypoint(
-//     project_dir: &PathBuf,
-//     function_name: &str,
-// ) -> Result<(), anyhow::Error> {
-//     let mut lib = File::open(StdPath::new(project_dir).join("src/lib.rs")).await?;
-//     let mut lib_string = String::new();
-//     lib.read_to_string(&mut lib_string).await?;
-//
-//     let updated_lib_string = lib_string.replace(
-//         "handler_dy(",
-//         &format!("{hmac}(", hmac = generate_hmac(function_name)),
-//     );
-//     println!("{}", updated_lib_string);
-//     lib.try_clone().await?;
-//     let mut lib = File::open(StdPath::new(project_dir).join("src/lib.rs")).await?;
-//     lib.write_all(updated_lib_string.as_bytes()).await?;
-//     Ok(())
-// }
 async fn extract_zip(zip_path: &StdPath, extract_to: &StdPath, function_name: &str) -> Result<(), anyhow::Error> {
     // Read the ZIP file into memory
     let data = fs::read(zip_path).await?;
@@ -277,13 +241,13 @@ async fn extract_zip(zip_path: &StdPath, extract_to: &StdPath, function_name: &s
                 }
 
                 if file.name() == "build.rs" {
-                    println!("Skipping build.rs");
+                    println!("Skipping build.rs, compile time code is forbidden.");
                     continue;
                 }
 
                 // Skip files inside `target/` directory
                 if outpath.starts_with(extract_to.join("target")) {
-                    println!("Skipping file in target directory: {:?}", outpath);
+                    // println!("Skipping file in target directory: {:?}", outpath);
                     continue;
                 }
 
@@ -295,20 +259,9 @@ async fn extract_zip(zip_path: &StdPath, extract_to: &StdPath, function_name: &s
                 let mut outfile = std::fs::File::create(&outpath)?;
                 if file.name().ends_with(".rs") {
                     // analyze_rust_file(&outpath.to_str().unwrap())?;
-                    let mut contents = String::new();
-                    file.read_to_string(&mut contents);
 
-                    // Perform the replacement
-                    let updated_contents = contents.replace(
-                        "handler_dy(",
-                        &format!("dy_{hmac}(", hmac = generate_hmac(&*function_name)),
-                    );
-
-                    // Write the updated contents back to the output path
-                    io::Write::write_all(&mut outfile, updated_contents.as_bytes())?;
-                } else {
-                    io::copy(&mut file, &mut outfile)?;
                 }
+                    io::copy(&mut file, &mut outfile)?;
             }
         }
 
@@ -317,25 +270,6 @@ async fn extract_zip(zip_path: &StdPath, extract_to: &StdPath, function_name: &s
     .await??;
 
     Ok(result)
-}
-
-/// Runs `cargo build --release` in the specified project directory.
-async fn build_project(project_dir: &StdPath) -> Result<(), anyhow::Error> {
-    let output = Command::new("cargo")
-        .arg("build")
-        .arg("--release")
-        .arg("--target-dir")
-        .arg("../target")
-        .current_dir(project_dir)
-        .output()
-        .await?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow::anyhow!("Cargo build failed: {}", stderr));
-    }
-
-    Ok(())
 }
 
 /// Streams the given multipart field to disk at `file_path`.

@@ -1,10 +1,14 @@
+
 use anyhow::Result;
 use geiger::{find_unsafe_in_string, IncludeTests};
 use lazy_static::lazy_static;
 use std::collections::HashSet;
+use std::path;
 use std::fs;
-use std::process::Command;
+use tokio::process::Command;
 use syn::{visit::Visit, Attribute, Path};
+
+static CLIPPY: &str = include_str!("../Clippy.toml");
 
 struct StdAndNoMangleVisitor {
     has_std_usage: bool,
@@ -29,7 +33,7 @@ impl<'ast> Visit<'ast> for StdAndNoMangleVisitor {
     }
 }
 
-pub fn analyze_rust_file(file_path: &str) -> Result<()> {
+pub async fn analyze_rust_file(file_path: &str) -> Result<()> {
     if !file_path.ends_with(".rs") {
         return Ok(());
     }
@@ -45,7 +49,7 @@ pub fn analyze_rust_file(file_path: &str) -> Result<()> {
         .arg("expand")
         .arg("--ugly")
         .current_dir("../".to_string() + file_path)
-        .output()?;
+        .output().await?;
 
     println!("expanded");
 
@@ -128,6 +132,46 @@ pub fn analyze_cargo_file(file_path: &str) -> Result<()> {
     Ok(())
 }
 
+pub async fn lint_project(project_dir: &std::path::Path) -> std::result::Result<(), anyhow::Error> {
+    // write the clippy config to a file
+    let clippy_toml_path = project_dir.join("Clippy.toml");
+    fs::write(clippy_toml_path, CLIPPY)?;
+    let clippy_output = Command::new("cargo")
+        .arg("clippy")
+        .arg("-D warnings") // Treat warnings as errors
+        .current_dir(project_dir)
+        .output()
+        .await?;
+
+    if !clippy_output.status.success() {
+        let stderr = String::from_utf8_lossy(&clippy_output.stderr);
+        return Err(anyhow::anyhow!("Cargo clippy failed: {}", stderr));
+    }
+
+    Ok(())
+}
+/// Runs `cargo build --release` in the specified project directory.
+pub async fn build_project(project_dir: &std::path::Path) -> std::result::Result<(), anyhow::Error> {
+    let output = Command::new("cargo")
+        .arg("build")
+        .arg("--release")
+        .arg("--target-dir")
+        .arg("../target")
+        .env("FAASTA_HMAC_SECRET", "read")
+        .current_dir(project_dir)
+        .output()
+        .await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(anyhow::anyhow!("Cargo build failed: {}", stderr));
+    }
+
+    Ok(())
+}
+
+
+
 lazy_static! {
     static ref ALLOWLIST: HashSet<String> = {
         vec![
@@ -142,6 +186,8 @@ lazy_static! {
             "tokio-rustls".to_string(),
             "sqlx".to_string(),
             "cap-async".to_string(),
+            "uuid".to_string(),
+            "macros".to_string(),
         ]
         .into_iter()
         .collect()

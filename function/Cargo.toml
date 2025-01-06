@@ -15,5 +15,7 @@ strip = true
 
 [dependencies]
 axum = { version = "0.8.1", default-features = false }
-cap-async-std = "3.4.2"
+cap-async-std = { version = "3.4.2", features = ["tokio1"] }
+faas-proc-macros = { path = "../macros" }
+sqlx = "0.8.3"
 

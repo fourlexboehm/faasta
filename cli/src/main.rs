@@ -1,11 +1,15 @@
+mod init;
+
+use faasta_analyze::lint_project;
 use anyhow::Error;
 use reqwest::{multipart, Client};
 use serde_json::Value;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
+use faasta_analyze::build_project;
 use std::process::{exit, Command};
 use std::{env, fmt};
-use analyze::{analyze_cargo_file, analyze_rust_file};
+use faasta_analyze::{analyze_cargo_file, analyze_rust_file};
 use tokio::io::AsyncReadExt;
 use walkdir::WalkDir;
 use zip::write::{ExtendedFileOptions, FileOptions};
@@ -86,7 +90,7 @@ pub async fn upload_project() -> Result<String, Error> {
             }
 
             if path.ends_with(".rs") {
-                analyze_rust_file(&path.to_str().unwrap())?;
+                analyze_rust_file(&path.to_str().unwrap()).await?;
             }
 
             // TODO sanitizize cargo.tomls
@@ -148,10 +152,14 @@ use clap::{Args, Parser, Subcommand};
 /// Main entry point
 #[tokio::main]
 async fn main() {
-    let FassProc::FaasProc(cli) = FassProc::parse();
+    let faasta::faasta(cli) = faasta::parse();
 
     match cli.command {
         Commands::Upload(args) => {
+            lint_project(&env::current_dir().unwrap()).await.unwrap_or_else(|e| {
+                eprintln!("Failed to lint project: {}", e);
+                exit(1);
+            });
             upload_project().await.unwrap_or_else(|e| {
                 eprintln!("Failed to upload project: {}", e);
                 exit(1);
@@ -166,16 +174,58 @@ async fn main() {
                     exit(1);
                 });
         }
+        Commands::Init => {
+            let package_name = "".to_string();
+
+            // Create NewArgs with the current directory's name
+            let new_args = NewArgs {
+                package_name,
+            };
+
+            // Delegate to handle_new function
+            if let Err(err) = init::handle_new(&new_args) {
+                eprintln!("Failed to initialize project in current directory: {err}");
+                exit(1);
+            }
+        }
+
+        Commands::New(new_args) => {
+            if let Err(err) = init::handle_new(&new_args) {
+                eprintln!("Failed to create new project: {err}");
+                exit(1);
+            }
+        },
+        Commands::Build => {
+            let (package_root, package_name) = find_root_package().unwrap();
+
+            // TODO Add safety /dependency lints here
+            lint_project(&package_root).await.unwrap_or_else(|e| {
+                eprintln!("Failed to lint project: {}", e);
+                exit(1);
+            });
+
+
+            build_project(&env::current_dir().unwrap()).await.unwrap_or_else(|e| {
+                eprintln!("Failed to build project: {}", e);
+                exit(1);
+            });
+        }
+
+
     }
 }
-
+#[derive(Args, Debug)]
+pub struct NewArgs {
+    /// The name of the package to create
+    package_name: String,
+}
 #[derive(Parser)] // requires `derive` feature
 #[command(name = "cargo")]
 #[command(bin_name = "cargo")]
 #[command(styles = CLAP_STYLING)]
-enum FassProc {
-    #[command(name = "fassproc")]
-    FaasProc(Cli),
+enum faasta {
+    #[command(name = "faasta")]
+    faasta(Cli),
 }
 
 #[derive(Args, Debug)]
@@ -190,6 +240,9 @@ enum Commands {
     Upload(UploadArgs),
     /// Invokes a function with the specified name and argument
     Invoke(InvokeArgs),
+    Init,
+    New(NewArgs),
+    Build,
 }
 
 #[derive(Args, Debug)]
