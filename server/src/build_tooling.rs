@@ -1,16 +1,16 @@
 use crate::LIB_CACHE;
 use axum::extract::Path as AxumPath;
 use axum::{extract::Multipart, http::StatusCode, response::IntoResponse};
+use faasta_analyze::{build_project, lint_project};
 use futures::{TryFutureExt, TryStreamExt};
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 use std::io::Read;
 use std::path::Path as StdPath;
 use std::{
     io,
     path::{Path, PathBuf},
 };
-use faasta_analyze::{build_project, lint_project};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use tokio::io::AsyncReadExt;
 use tokio::{
     fs::{self, File},
@@ -32,9 +32,10 @@ pub async fn handle_upload_and_build(
 ) -> impl IntoResponse {
     dbg!(&function_name);
 
+    let secret = include_str!("../../faasta-hmac-secret");
     // Create a unique project directory based on the function name
     let project_dir = PathBuf::from(BUILDS_DIRECTORY).join(&function_name);
-    let hmac = generate_hmac(&function_name);
+    let hmac = generate_hmac(&function_name, secret);
 
     // Ensure the project directory exists
     if let Err(e) = fs::create_dir_all(&project_dir).await {
@@ -163,9 +164,13 @@ pub async fn handle_upload_and_build(
         "so"
     };
 
-    let target_release = project_dir.join(format!("../target/release/lib{function_name}.{extension}"));
+    let target_release =
+        project_dir.join(format!("../target/release/lib{function_name}.{extension}"));
     // stat
-    let library_path = fs::metadata(&target_release).await.map(|_| target_release).ok();
+    let library_path = fs::metadata(&target_release)
+        .await
+        .map(|_| target_release)
+        .ok();
 
     let Some(lib_path) = library_path else {
         // eprintln!("No library found in release directory: {}", target_release);
@@ -212,7 +217,11 @@ pub async fn handle_upload_and_build(
         .into_response()
 }
 
-async fn extract_zip(zip_path: &StdPath, extract_to: &StdPath, function_name: &str) -> Result<(), anyhow::Error> {
+async fn extract_zip(
+    zip_path: &StdPath,
+    extract_to: &StdPath,
+    function_name: &str,
+) -> Result<(), anyhow::Error> {
     // Read the ZIP file into memory
     let data = fs::read(zip_path).await?;
 
@@ -259,9 +268,8 @@ async fn extract_zip(zip_path: &StdPath, extract_to: &StdPath, function_name: &s
                 let mut outfile = std::fs::File::create(&outpath)?;
                 if file.name().ends_with(".rs") {
                     // analyze_rust_file(&outpath.to_str().unwrap())?;
-
                 }
-                    io::copy(&mut file, &mut outfile)?;
+                io::copy(&mut file, &mut outfile)?;
             }
         }
 
@@ -307,19 +315,35 @@ fn path_is_valid(path: &str) -> bool {
     components.count() == 1
 }
 
-pub fn generate_hmac(data: &str) -> String {
-    type HmacSha256 = Hmac<Sha256>;
+pub fn generate_hmac(data: &str, secret: &str) -> String {
+    let mut key = [0u8; 32];
+    let secret_bytes = secret.as_bytes();
 
-    let mut mac = HmacSha256::new_from_slice(b"HAEC*#BGE*QJOTBbhodegB@8BHAcH")
-        .expect("HMAC can take key of any size");
-    mac.update(data.as_ref());
+    // Copy up to 32 bytes from the secret into the key
+    let len = secret_bytes.len().min(32);
+    key[..len].copy_from_slice(&secret_bytes[..len]);
 
-    // `result` has type `CtOutput` which is a thin wrapper around array of
-    // bytes for providing constant time equality check
-    let result = mac.finalize();
-    // To get underlying array use `into_bytes`, but be careful, since
-    // incorrect use of the code value may permit timing attacks which defeats
-    // the security provided by the `CtOutput`
-    let code_bytes = result.into_bytes();
-    hex::encode(code_bytes)
+    blake3::keyed_hash(
+        &key,
+        data.as_bytes(),
+    ).to_string()
 }
+
+
+// pub fn generate_hmac(data: &str, secret: &str) -> String {
+//     return "function".to_string();
+//     type HmacSha256 = Hmac<Sha256>;
+//
+//     let mut mac = HmacSha256::new_from_slice(secret.as_ref())
+//         .expect("HMAC can take key of any size");
+//     mac.update(data.as_ref());
+//
+//     // `result` has type `CtOutput` which is a thin wrapper around array of
+//     // bytes for providing constant time equality check
+//     let result = mac.finalize();
+//     // To get underlying array use `into_bytes`, but be careful, since
+//     // incorrect use of the code value may permit timing attacks which defeats
+//     // the security provided by the `CtOutput`
+//     let code_bytes = result.into_bytes();
+//     hex::encode(code_bytes)
+// }

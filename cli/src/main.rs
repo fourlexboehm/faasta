@@ -248,7 +248,7 @@ enum Commands {
 #[derive(Args, Debug)]
 struct UploadArgs {
     /// Path to the project to upload
-    path: String,
+    path: Option<String>,
 }
 
 #[derive(Args, Debug)]

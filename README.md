@@ -2,8 +2,8 @@
 
 Faasta is a cutting-edge Function-as-a-Service (FaaS) platform designed for exceptional speed and efficiency. With **cold start times under 1ms** and a **memory overhead of less than 1KB**, Faasta achieves unparalleled performance by:
 
-- Compiling your code as a **dynamic library**.
-- Loading it at runtime without relying on containerization.
+- Compiling your code as a **native dynamic library**.
+- Loading it in process at runtime without relying on containerization or WASM.
 - Enforcing **in-process isolation** between functions using static analysis to prevent memory sharing.
 
 ---

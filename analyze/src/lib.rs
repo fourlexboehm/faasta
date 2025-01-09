@@ -7,6 +7,7 @@ use std::path;
 use std::fs;
 use tokio::process::Command;
 use syn::{visit::Visit, Attribute, Path};
+use log::info;
 
 static CLIPPY: &str = include_str!("../Clippy.toml");
 
@@ -51,6 +52,7 @@ pub async fn analyze_rust_file(file_path: &str) -> Result<()> {
         .current_dir("../".to_string() + file_path)
         .output().await?;
 
+    // println!("{}", output)
     println!("expanded");
 
     if !output.status.success() {
@@ -106,14 +108,12 @@ pub async fn analyze_rust_file(file_path: &str) -> Result<()> {
 
 pub fn analyze_cargo_file(file_path: &str) -> Result<()> {
     // Read the Cargo.toml file
-    println!("parsing toml");
-    println!("{}", file_path);
+    // println!("parsing toml");
+    info!("Validating Cargo.toml file");
     let cargo_toml = fs::read_to_string(file_path)?;
 
-    println!("{}", cargo_toml);
     // Parse the Cargo.toml file
     let cargo_toml: toml::Value = toml::from_str(&cargo_toml)?;
-    println!("parsed toml");
 
     // Check for dependencies that are not in the allowlist
     if let Some(deps) = cargo_toml.get("dependencies") {
@@ -138,7 +138,9 @@ pub async fn lint_project(project_dir: &std::path::Path) -> std::result::Result<
     fs::write(clippy_toml_path, CLIPPY)?;
     let clippy_output = Command::new("cargo")
         .arg("clippy")
-        .arg("-D warnings") // Treat warnings as errors
+        .arg("--")
+        .arg("-D")
+        .arg("warnings") // Treat warnings as errors
         .current_dir(project_dir)
         .output()
         .await?;
@@ -157,7 +159,7 @@ pub async fn build_project(project_dir: &std::path::Path) -> std::result::Result
         .arg("--release")
         .arg("--target-dir")
         .arg("../target")
-        .env("FAASTA_HMAC_SECRET", "read")
+        .env("FAASTA_HMAC_SECRET",  include_str!("../../faasta-hmac-secret"))
         .current_dir(project_dir)
         .output()
         .await?;
@@ -188,6 +190,7 @@ lazy_static! {
             "cap-async".to_string(),
             "uuid".to_string(),
             "macros".to_string(),
+            "faasta-macros".to_string(),
         ]
         .into_iter()
         .collect()

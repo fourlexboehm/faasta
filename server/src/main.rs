@@ -1,5 +1,7 @@
 mod build_tooling;
+mod metrics;
 
+use std::cmp::max;
 use crate::build_tooling::{generate_hmac, handle_upload_and_build};
 use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
@@ -12,7 +14,9 @@ use axum::{
     routing::{get, post},
     BoxError, Router,
 };
+use cap_async_std::fs::Dir;
 use chashmap::CHashMap;
+use dashmap::DashMap;
 use http::{HeaderMap, Method, Uri};
 use lazy_static::lazy_static;
 use libloading::{Library, Symbol};
@@ -23,12 +27,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::AtomicUsize;
 use std::time::Duration;
-use cap_async_std::fs::Dir;
+use cap_async_std::{ambient_authority, AmbientAuthority};
 use tokio::fs;
 use tower::timeout::TimeoutLayer;
 use tower::{timeout, ServiceBuilder};
 use tower_http::catch_panic::CatchPanicLayer;
-
 
 // type HandleRequestFn = fn(Method, Uri, HeaderMap, Bytes) -> Response;
 type HandleRequestFn =
@@ -37,12 +40,12 @@ type HandleRequestFn =
         Uri,
         HeaderMap,
         Bytes,
-        Dir
+        Dir,
     ) -> Pin<Box<dyn Future<Output = Response<Body>> + Send + 'static>>;
 
 lazy_static! {
     /// This is an example for using doc comment attributes
-    static ref LIB_CACHE: CHashMap<String, (Library, AtomicUsize)> = CHashMap::new();
+    static ref LIB_CACHE: DashMap<String, (Library, AtomicUsize)> = DashMap::new();
 }
 
 async fn handle_invoke_rs(
@@ -53,11 +56,10 @@ async fn handle_invoke_rs(
     body: Bytes,
 ) -> impl IntoResponse {
     // dbg!(&function_name);
+    let secret = include_str!("../../faasta-hmac-secret");
     let start_time = std::time::Instant::now();
     let lib = match LIB_CACHE.get(&function_name) {
-        Some(lib) => {
-            lib
-        }
+        Some(lib) => lib,
         None => {
             // Otherwise, open it
             let path = format!("./functions/{name}", name = function_name);
@@ -75,31 +77,50 @@ async fn handle_invoke_rs(
             };
             // Insert into our map
             LIB_CACHE.insert(function_name.clone(), (new_lib, AtomicUsize::new(1)));
-            // if LIB_CACHE.len() > 1000 {
-            //     tokio::spawn(async move {
-            //         // Remove the least used function
-            //         LIB_CACHE.iter().min_by_key(|(_, v)| v.1.load(std::sync::atomic::Ordering::Relaxed)).map(|(least_used, _)| {
-            //             LIB_CACHE.remove(&least_used);
-            //         })
-            //     });
-            // }
+            if LIB_CACHE.len() > 1000 {
+                tokio::spawn(async move {
+                    // Remove the least used function
+                    let min_func = LIB_CACHE
+                        .iter()
+                        .min_by_key(|it| it.value().1.load(std::sync::atomic::Ordering::Relaxed));
+                    if let Some(min_func) = min_func {
+                        LIB_CACHE.remove(min_func.key());
+                    }
+                });
+            }
             LIB_CACHE.get(&function_name).unwrap()
         }
     };
     // TODO computing HMAC is expensive, we should cache this or switch to blake2/3
-    let hmac = "dy_".to_string() + &*generate_hmac(&*function_name);
+    let hmac = "dy_".to_string() + &*generate_hmac(&*function_name, secret);
     println!("{}", hmac);
-    let handle_request: Symbol<HandleRequestFn> = unsafe { lib.0.get(hmac.as_ref()).unwrap() };
+
+    let handle_request: Symbol<HandleRequestFn> = unsafe {
+        match lib.0.get(hmac.as_ref()) {
+            Ok(symbol) => symbol,
+            Err(_) => {
+                return (StatusCode::NOT_FOUND, "Function handler not found").into_response();
+            }
+        }
+    };
 
     let path = format!("./sandbox/{function_name}");
-    let _ = fs::create_dir_all(&path).await;
-    let sandbox = Dir::from_std_file(async_std::fs::File::open(path).await.unwrap());
+    // let _ = fs::create_dir_all(&path).await;
+    let sandbox = Dir::open_ambient_dir(&path, ambient_authority()).await.unwrap();
+    // let sandbox = Dir::from_std_file(async_std::fs::File::open(path).await.unwrap());
 
     let response = handle_request(method, uri, headers, body, sandbox).await;
     println!("Function {} took {:?}", function_name, start_time.elapsed());
-    lib.1.fetch_add(start_time.elapsed().as_millis() as usize, std::sync::atomic::Ordering::Relaxed);
+    lib.1.fetch_add(
+        max(start_time.elapsed().as_millis() as usize, 1),
+        std::sync::atomic::Ordering::Relaxed,
+    );
     response
 }
+
+
+
+
 #[derive(Debug)]
 struct TimeoutError {
     message: String,
@@ -135,6 +156,14 @@ async fn handle_timeout_error(error: BoxError) -> TimeoutError {
         TimeoutError::new(format!("Unhandled error: {}", error))
     }
 }
+// type LibCache = CHashMap<String, (Library, AtomicUsize)>;
+// #[derive(Clone)]
+// struct AppState {
+//     // total_requests: AtomicUsize,
+//     // total_time: AtomicUsize,
+//     // average_time: AtomicUsize,
+//     libs: LibCache,
+// }
 #[tokio::main]
 async fn main() {
     let service = ServiceBuilder::new()
@@ -143,6 +172,7 @@ async fn main() {
         .layer(TimeoutLayer::new(Duration::from_secs(900)));
     let app = Router::new()
         // POST /upload
+        .route("/metrics", get(metrics::get_metrics))
         .route("/upload/{function_name}", post(handle_upload_and_build))
         // .route("/upload", post(handle_upload))
         // GET /invoke/{function_name}

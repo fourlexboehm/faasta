@@ -4,7 +4,7 @@ use axum::body::{Body, Bytes};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::Response;
 use cap_async_std::fs::Dir;
-use faas_proc_macros::faasta;
+use faasta_macros::faasta;
 // #[no_mangle]
 // pub extern "Rust" fn handler_dy(
 //     method: Method,
@@ -70,6 +70,5 @@ use faas_proc_macros::faasta;
 // async fn handler(method: Method, uri: Uri, headers: HeaderMap, body: Bytes) -> Response<Body> {
 #[faasta]
 async fn handler(method: Method, uri: Uri, headers: HeaderMap, body: Bytes, dir: Dir) -> Response<Body> {
-    let _ = cap_async_std::ambient_authority();
     Response::builder().status(StatusCode::OK).body(Body::from("HELLO WORLD")).unwrap()
 }

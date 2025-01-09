@@ -439,6 +439,7 @@ dependencies = [
  "anyhow",
  "geiger",
  "lazy_static",
+ "log",
  "quote",
  "syn 2.0.94",
  "tokio",
