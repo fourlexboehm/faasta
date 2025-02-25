@@ -23,7 +23,7 @@ pub async fn get_metrics() -> impl IntoResponse {
         LIB_CACHE
             .iter()
             .fold((Vec::new(), 0u64), |(mut metrics, sum), entry| {
-                let time = entry.value().1.load(std::sync::atomic::Ordering::Relaxed) as u64;
+                let time = entry.value().usage_count.load(std::sync::atomic::Ordering::Relaxed) as u64;
                 metrics.push(FunctionMetrics {
                     function_name: entry.key().to_string(),
                     total_time_millis: time,

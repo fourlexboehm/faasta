@@ -6,12 +6,10 @@ license = "MIT"
 description = "Proc macros for Faasta"
 
 [dependencies]
-quote = "1.0.38"
-syn = { version = "2.0.95", features = ["full", "visit"] }
-blake3 = "1.5.5"
-hmac = "0.13.0-pre.4"
-sha2 = "0.11.0-pre.4"
-hex = "0.4.3"
+quote = "1"
+syn = { version = "2", features = ["full", "visit"] }
+blake3 = "1"
 
 [lib]
 proc-macro = true
+

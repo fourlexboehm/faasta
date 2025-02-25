@@ -16,6 +16,6 @@ strip = true
 [dependencies]
 axum = { version = "0.8.1", default-features = false }
 cap-async-std = { version = "3.4.2", features = ["tokio1"] }
-faasta-macros = { path = "../macros" }
+faasta-macros = "0.0.1"
 sqlx = "0.8.3"
 

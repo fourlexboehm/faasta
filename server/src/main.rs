@@ -15,7 +15,6 @@ use axum::{
     BoxError, Router,
 };
 use cap_async_std::fs::Dir;
-use chashmap::CHashMap;
 use dashmap::DashMap;
 use http::{HeaderMap, Method, Uri};
 use lazy_static::lazy_static;
@@ -25,7 +24,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use cap_async_std::{ambient_authority, AmbientAuthority};
 use tokio::fs;
@@ -35,17 +34,31 @@ use tower_http::catch_panic::CatchPanicLayer;
 
 // type HandleRequestFn = fn(Method, Uri, HeaderMap, Bytes) -> Response;
 type HandleRequestFn =
-    extern "Rust" fn(
-        Method,
-        Uri,
-        HeaderMap,
-        Bytes,
-        Dir,
-    ) -> Pin<Box<dyn Future<Output = Response<Body>> + Send + 'static>>;
+extern "Rust" fn(
+    Method,
+    Uri,
+    HeaderMap,
+    Bytes,
+    Dir,
+) -> Pin<Box<dyn Future<Output=Response<Body>> + Send + 'static>>;
 
 lazy_static! {
-    /// This is an example for using doc comment attributes
-    static ref LIB_CACHE: DashMap<String, (Library, AtomicUsize)> = DashMap::new();
+    static ref LIB_CACHE: DashMap<String, LoadedFunction> = DashMap::new();
+}
+struct LoadedFunction {
+    library: Library,
+    handle_fn: HandleRequestFn, // the symbol as a raw function pointer
+    usage_count: AtomicUsize,
+}
+
+impl LoadedFunction {
+    fn new(library: Library, handle_fn: HandleRequestFn) -> Self {
+        Self {
+            library,
+            handle_fn,
+            usage_count: AtomicUsize::new(0),
+        }
+    }
 }
 
 async fn handle_invoke_rs(
@@ -55,11 +68,9 @@ async fn handle_invoke_rs(
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
-    // dbg!(&function_name);
-    let secret = include_str!("../../faasta-hmac-secret");
-    let start_time = std::time::Instant::now();
-    let lib = match LIB_CACHE.get(&function_name) {
-        Some(lib) => lib,
+    // attempt to fetch from the cache
+    let loaded_fn = match LIB_CACHE.get(&function_name) {
+        Some(loaded) => loaded,
         None => {
             // Otherwise, open it
             let path = format!("./functions/{name}", name = function_name);
@@ -67,57 +78,72 @@ async fn handle_invoke_rs(
                 return (StatusCode::NOT_FOUND, "Function not found").into_response();
             }
             let new_lib = unsafe {
-                match Library::new(path) {
+                match Library::new(&path) {
                     Ok(lib) => lib,
                     Err(_) => {
-                        return (StatusCode::NOT_FOUND, "Function could not be loaded")
-                            .into_response()
+                        return (StatusCode::NOT_FOUND, "Function could not be loaded").into_response()
                     }
                 }
             };
-            // Insert into our map
-            LIB_CACHE.insert(function_name.clone(), (new_lib, AtomicUsize::new(1)));
-            if LIB_CACHE.len() > 1000 {
-                tokio::spawn(async move {
-                    // Remove the least used function
-                    let min_func = LIB_CACHE
-                        .iter()
-                        .min_by_key(|it| it.value().1.load(std::sync::atomic::Ordering::Relaxed));
-                    if let Some(min_func) = min_func {
-                        LIB_CACHE.remove(min_func.key());
+
+            // Generate the symbol name (e.g. "dy_...")
+            let secret = include_str!("../../faasta-hmac-secret");
+            let hmac = "dy_".to_string() + &*generate_hmac(&*function_name, secret);
+
+            // Safely look up the symbol *once*
+            let symbol: Symbol<HandleRequestFn> = unsafe {
+                match new_lib.get(hmac.as_bytes()) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        return (StatusCode::NOT_FOUND, "Function handler not found").into_response();
                     }
-                });
-            }
+                }
+            };
+
+            // Turn the Symbol<HandleRequestFn> into a raw fn pointer
+            let handle_fn = *symbol;
+
+            // Store in the map
+            let inserted = LoadedFunction::new(new_lib, handle_fn);
+            LIB_CACHE.insert(function_name.clone(), inserted);
+
+            // get a fresh reference from the map
             LIB_CACHE.get(&function_name).unwrap()
         }
     };
-    // TODO computing HMAC is expensive, we should cache this or switch to blake2/3
-    let hmac = "dy_".to_string() + &*generate_hmac(&*function_name, secret);
-    println!("{}", hmac);
+    let start_time = std::time::Instant::now();
+    loaded_fn.usage_count.fetch_add(1, Ordering::Relaxed); // or track usage times, etc.
 
-    let handle_request: Symbol<HandleRequestFn> = unsafe {
-        match lib.0.get(hmac.as_ref()) {
-            Ok(symbol) => symbol,
-            Err(_) => {
-                return (StatusCode::NOT_FOUND, "Function handler not found").into_response();
-            }
-        }
-    };
-
+    // Prepare your sandbox if needed
     let path = format!("./sandbox/{function_name}");
-    // let _ = fs::create_dir_all(&path).await;
     let sandbox = Dir::open_ambient_dir(&path, ambient_authority()).await.unwrap();
-    // let sandbox = Dir::from_std_file(async_std::fs::File::open(path).await.unwrap());
 
-    let response = handle_request(method, uri, headers, body, sandbox).await;
-    println!("Function {} took {:?}", function_name, start_time.elapsed());
-    lib.1.fetch_add(
-        max(start_time.elapsed().as_millis() as usize, 1),
-        std::sync::atomic::Ordering::Relaxed,
+    // Then call the function pointer directly
+    let response = (loaded_fn.handle_fn)(method, uri, headers, body, sandbox).await;
+
+    // Optionally track timings
+    loaded_fn
+        .usage_count
+        .fetch_add(max(start_time.elapsed().as_millis() as usize, 1), Ordering::Relaxed);
+
+    println!(
+        "Function {} took {:?}",
+        function_name,
+        start_time.elapsed()
     );
+    if LIB_CACHE.len() > 1000 {
+        tokio::spawn(async move {
+            // Remove the least used function
+            let min_func = LIB_CACHE
+                .iter()
+                .min_by_key(|it| it.value().usage_count.load(std::sync::atomic::Ordering::Relaxed));
+            if let Some(min_func) = min_func {
+                LIB_CACHE.remove(min_func.key());
+            }
+        });
+    }
     response
 }
-
 
 
 
@@ -248,7 +274,6 @@ async fn main() {
 //     };
 //
 //     // 5. Load library and symbol
-//     // TODO USE .SO on linux
 //     let lib = unsafe { Library::new("uploads/".to_string() + &*function_name + ".dylib") }.unwrap();
 //     let handle_request: Symbol<HandleRequestCFn> = unsafe { lib.get(b"handle_request") }.unwrap();
 //

@@ -1,0 +1,7 @@
+# Rust build artifacts
+/target/
+/debug/
+/target/**/*
+.git
+.gitignore
+.gcloudignore

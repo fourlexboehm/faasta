@@ -9,8 +9,6 @@ use std::{
     io,
     path::{Path, PathBuf},
 };
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 use tokio::io::AsyncReadExt;
 use tokio::{
     fs::{self, File},
@@ -123,8 +121,6 @@ pub async fn handle_upload_and_build(
             }
 
             // TODO check for zip bomb
-            // check file size
-            // fs::read_dir().await
 
             // Optionally, remove the ZIP file after extraction
             if let Err(e) = fs::remove_file(&zip_path).await {

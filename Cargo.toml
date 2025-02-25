@@ -1,0 +1,9 @@
+[workspace]
+resolver = "2"
+members = ["analyze", "cli", "server", "macros", ]
+
+[workspace.dependencies]
+anyhow = "1.0.95"
+tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "rt"] }
+serde_json = "1.0.134"
+zip = "2.2.2"

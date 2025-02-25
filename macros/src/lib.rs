@@ -1,8 +1,6 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use std::env;
-use hmac::{Hmac, KeyInit, Mac};
-use sha2::Sha256;
 use syn::{parse_macro_input, ItemFn};
 
 /// Transforms an `async fn` into an exported function suitable for use in FaaS-based runtimes.
@@ -169,22 +167,3 @@ fn generate_hmac(data: &str, secret: &str) -> String {
         data.as_bytes(),
     ).to_string()
 }
-
-// fn generate_hmac(data: &str, secret: &str) -> String {
-//     return "function".to_string();
-//
-//     type HmacSha256 = Hmac<Sha256>;
-//
-//     let mut mac = HmacSha256::new_from_slice(secret.as_ref())
-//         .expect("HMAC can take key of any size");
-//     mac.update(data.as_ref());
-//
-//     // `result` has type `CtOutput` which is a thin wrapper around array of
-//     // bytes for providing constant time equality check
-//     let result = mac.finalize();
-//     // To get underlying array use `into_bytes`, but be careful, since
-//     // incorrect use of the code value may permit timing attacks which defeats
-//     // the security provided by the `CtOutput`
-//     let code_bytes = result.into_bytes();
-//     hex::encode(code_bytes)
-// }

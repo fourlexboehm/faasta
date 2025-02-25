@@ -37,46 +37,6 @@ pub fn handle_new(args: &NewArgs) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-
-/// Writes the embedded Cargo.toml & main.rs to disk for event packages,
-/// updating the `[package] name` in Cargo.toml to `package_name` and
-/// inserting the selected `event_type` into main.rs.
-fn write_event_files(
-    project_dir: &Path,
-    cargo_toml_str: &str,
-    main_rs_str: &str,
-    package_name: &str,
-    event_type: &str,
-) -> io::Result<()> {
-    let cargo_toml_path = project_dir.join("Cargo.toml");
-    let updated_cargo_toml = rewrite_package_name(cargo_toml_str, package_name);
-    fs::write(cargo_toml_path, updated_cargo_toml)?;
-
-    // Find the position after the last "::"
-    let tail_start = event_type.rfind("::").unwrap() + 2;
-
-    // Extract the substring after "::"
-    let tail_substring = &event_type[tail_start..];
-
-    // TODO: This wont work for all event types, figure out a more robust way, either using reflection or a map
-    // Replace "Event" with "Data" in that tail substring
-    let new_tail = tail_substring.replace("Event", "Data");
-
-    // Build the final string for main.rs
-    let updated_main_rs = main_rs_str
-        .replace(
-            "google_cloudevents::google::events::cloud::pubsub::v1::MessagePublishedData",
-            event_type,
-        )
-        // Now swap out just the tail
-        .replace("MessagePublishedData", &new_tail);
-
-    // Write changes to src/main.rs
-    let main_rs_path = project_dir.join("src").join("main.rs");
-    fs::write(main_rs_path, updated_main_rs)?;
-    Ok(())
-}
-
 /// Writes the embedded Cargo.toml & main.rs to disk,
 /// updating the `[package] name` in Cargo.toml to `package_name`.
 fn write_files(

@@ -177,7 +177,9 @@ pub async fn build_project(project_dir: &std::path::Path) -> std::result::Result
 lazy_static! {
     static ref ALLOWLIST: HashSet<String> = {
         vec![
-            "tokio".to_string(),
+            // "tokio".to_string(),
+            "rust-s3".to_string(),
+            "aws-sdk-s3".to_string(),
             "axum".to_string(),
             "serde".to_string(),
             "cap-async-std".to_string(),

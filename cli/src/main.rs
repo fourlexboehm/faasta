@@ -49,7 +49,6 @@ impl fmt::Display for CustomError {
 /// Zips up the local project (skipping `target/` and build scripts)
 /// and uploads it as a single multipart form field named `"archive"`.
 pub async fn upload_project() -> Result<String, Error> {
-    // Example function to find your project root & name
     let (package_root, package_name) = find_root_package().unwrap();
 
     // 1) Create an in-memory buffer that we'll write the zip to.
@@ -97,7 +96,6 @@ pub async fn upload_project() -> Result<String, Error> {
             if path.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
                 analyze_cargo_file(&path.to_str().unwrap())?;
             }
-
 
             // Derive the relative path from package_root so we can store that
             // exact path in the zip. For example, `src/main.rs`.
@@ -196,7 +194,7 @@ async fn main() {
             }
         },
         Commands::Build => {
-            let (package_root, package_name) = find_root_package().unwrap();
+            let (package_root, package_name) = find_root_package().expect("Failed to find root package");
 
             // TODO Add safety /dependency lints here
             lint_project(&package_root).await.unwrap_or_else(|e| {
@@ -276,10 +274,8 @@ async fn invoke_function(name: &str, arg: &str) -> Result<(), reqwest::Error> {
     Ok(())
 }
 
-/// Find the Cargo workspace root and the *root package name* using `cargo metadata`.
-/// Returns a tuple: (workspace_root_path, root_package_name).
-///
-/// Assumes there *is* a package in the workspace root (i.e., not just a virtual manifest).
+/// Find a workspace root package if it exists; otherwise pick the
+/// current/only package from cargo metadata.
 fn find_root_package() -> Result<(PathBuf, String), Box<dyn std::error::Error>> {
     // Run `cargo metadata --format-version=1`
     let output = Command::new("cargo")
@@ -299,25 +295,22 @@ fn find_root_package() -> Result<(PathBuf, String), Box<dyn std::error::Error>> 
     };
     let workspace_root = PathBuf::from(workspace_root_str);
 
-    // Look through the "packages" array and see which package has
-    // `manifest_path` = workspace_root + "Cargo.toml"
+    // Look through the "packages" array
     let Some(packages) = v.get("packages").and_then(Value::as_array) else {
         return Err("'packages' not found or is not an array in cargo metadata".into());
     };
 
-    let manifest_path = workspace_root
-        .join("Cargo.toml")
-        .to_string_lossy()
-        .to_string();
+    // Build what we expect for the "root" package's manifest path
+    let root_manifest_path = workspace_root.join("Cargo.toml").to_string_lossy().to_string();
 
+    // Try to find a package that matches the workspace root
     for pkg in packages {
         let pkg_manifest_path = pkg
             .get("manifest_path")
             .and_then(Value::as_str)
             .unwrap_or_default();
 
-        // Compare them in a platform-agnostic way
-        if same_file_path(&pkg_manifest_path, &manifest_path) {
+        if same_file_path(&pkg_manifest_path, &root_manifest_path) {
             // Found the root package
             let Some(pkg_name) = pkg.get("name").and_then(Value::as_str) else {
                 return Err("Package in root has no 'name' in cargo metadata".into());
@@ -326,8 +319,34 @@ fn find_root_package() -> Result<(PathBuf, String), Box<dyn std::error::Error>> 
         }
     }
 
+    // If we reach here, no package at the workspace root. Possibly a virtual manifest.
+    // Fallback: if there's exactly one package total, pick it.
+    if packages.len() == 1 {
+        let pkg = &packages[0];
+        let Some(pkg_obj) = pkg.as_object() else {
+            return Err("Expected 'packages[0]' to be an object".into());
+        };
+
+        let Some(pkg_name) = pkg_obj.get("name").and_then(Value::as_str) else {
+            return Err("Single package has no 'name' field".into());
+        };
+        let Some(pkg_manifest_str) = pkg_obj.get("manifest_path").and_then(Value::as_str) else {
+            return Err("Single package has no 'manifest_path' field".into());
+        };
+
+        // We'll treat the parent directory of that single manifest as its root
+        let package_path = PathBuf::from(pkg_manifest_str)
+            .parent()
+            .ok_or("Could not get parent directory of manifest_path")?
+            .to_path_buf();
+
+        return Ok((package_path, pkg_name.to_owned()));
+    }
+
+    // Otherwise, return an error if there's more than one package.
     Err(format!(
-        "Did not find a package with manifest_path = {manifest_path}"
+        "No package found in {} (virtual manifest?), and multiple packages exist; cannot pick a single fallback package.",
+        root_manifest_path
     ))?
 }
 
