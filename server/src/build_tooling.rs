@@ -2,18 +2,15 @@ use crate::LIB_CACHE;
 use axum::extract::Path as AxumPath;
 use axum::{extract::Multipart, http::StatusCode, response::IntoResponse};
 use faasta_analyze::{build_project, lint_project};
-use futures::{TryFutureExt, TryStreamExt};
-use std::io::Read;
+use futures::{TryStreamExt};
 use std::path::Path as StdPath;
 use std::{
     io,
     path::{Path, PathBuf},
 };
-use tokio::io::AsyncReadExt;
 use tokio::{
     fs::{self, File},
     io::BufWriter,
-    process::Command,
 };
 use tokio_util::io::StreamReader;
 use zip::ZipArchive;
@@ -33,7 +30,7 @@ pub async fn handle_upload_and_build(
     let secret = include_str!("../../faasta-hmac-secret");
     // Create a unique project directory based on the function name
     let project_dir = PathBuf::from(BUILDS_DIRECTORY).join(&function_name);
-    let hmac = generate_hmac(&function_name, secret);
+    let _hmac = generate_hmac(&function_name, secret);
 
     // Ensure the project directory exists
     if let Err(e) = fs::create_dir_all(&project_dir).await {
@@ -222,7 +219,7 @@ async fn extract_zip(
     let data = fs::read(zip_path).await?;
 
     // Spawn a blocking task to handle ZIP extraction
-    let function_name = function_name.to_string();
+    let _function_name = function_name.to_string();
     let extract_to = extract_to.to_path_buf();
     let result = tokio::task::spawn_blocking(move || {
         let cursor = io::Cursor::new(data);

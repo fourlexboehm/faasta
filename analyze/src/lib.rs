@@ -3,7 +3,6 @@ use anyhow::Result;
 use geiger::{find_unsafe_in_string, IncludeTests};
 use lazy_static::lazy_static;
 use std::collections::HashSet;
-use std::path;
 use std::fs;
 use tokio::process::Command;
 use syn::{visit::Visit, Attribute, Path};

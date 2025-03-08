@@ -10,7 +10,6 @@ use faasta_analyze::build_project;
 use std::process::{exit, Command};
 use std::{env, fmt};
 use faasta_analyze::{analyze_cargo_file, analyze_rust_file};
-use tokio::io::AsyncReadExt;
 use walkdir::WalkDir;
 use zip::write::{ExtendedFileOptions, FileOptions};
 use zip::{CompressionMethod, ZipWriter};
@@ -49,7 +48,7 @@ impl fmt::Display for CustomError {
 /// Zips up the local project (skipping `target/` and build scripts)
 /// and uploads it as a single multipart form field named `"archive"`.
 pub async fn upload_project() -> Result<String, Error> {
-    let (package_root, package_name) = find_root_package().unwrap();
+    let (package_root, _package_name) = find_root_package().unwrap();
 
     // 1) Create an in-memory buffer that we'll write the zip to.
     let mut buffer = Vec::new();
@@ -124,13 +123,13 @@ pub async fn upload_project() -> Result<String, Error> {
     let zip_part = multipart::Part::bytes(buffer)
         // The actual filename on the server is up to you;
         // you can name it e.g. `<crate_name>.zip` or "project.zip"
-        .file_name(format!("{}.zip", package_name));
+        .file_name(format!("{}.zip", _package_name));
 
     let form = multipart::Form::new()
         .part("archive", zip_part);
 
     // 4) Send the POST request with our zip file in the form
-    let url = format!("{}/{}", UPLOAD_URL, package_name);
+    let url = format!("{}/{}", UPLOAD_URL, _package_name);
     let response = client
         .post(&url)
         .multipart(form)
@@ -140,6 +139,7 @@ pub async fn upload_project() -> Result<String, Error> {
     // 5) Return the response body as text, or handle it however needed
     let text = response.text().await?;
     println!("Server response: {text}");
+    println!("Function URL: {}", INVOKE_URL.to_string()  + &_package_name);
 
     Ok(text)
 }
@@ -150,18 +150,28 @@ use clap::{Args, Parser, Subcommand};
 /// Main entry point
 #[tokio::main]
 async fn main() {
-    let faasta::faasta(cli) = faasta::parse();
+    let Faasta::Faasta(cli) = Faasta::parse();
 
     match cli.command {
-        Commands::Upload(args) => {
+        Commands::Upload(_args) => {
+            let spinner = indicatif::ProgressBar::new_spinner();
+            spinner.set_message("Linting project...");
+            spinner.enable_steady_tick(std::time::Duration::from_millis(100));
+
             lint_project(&env::current_dir().unwrap()).await.unwrap_or_else(|e| {
+                spinner.finish_and_clear();
                 eprintln!("Failed to lint project: {}", e);
                 exit(1);
             });
+
+            spinner.set_message("Uploading project...");
             upload_project().await.unwrap_or_else(|e| {
+                spinner.finish_and_clear();
                 eprintln!("Failed to upload project: {}", e);
                 exit(1);
             });
+
+            spinner.finish_and_clear();
         }
 
         Commands::Invoke(args) => {
@@ -173,11 +183,11 @@ async fn main() {
                 });
         }
         Commands::Init => {
-            let package_name = "".to_string();
+            let _package_name = "".to_string();
 
             // Create NewArgs with the current directory's name
             let new_args = NewArgs {
-                package_name,
+                package_name: _package_name,
             };
 
             // Delegate to handle_new function
@@ -194,7 +204,7 @@ async fn main() {
             }
         },
         Commands::Build => {
-            let (package_root, package_name) = find_root_package().expect("Failed to find root package");
+            let (package_root, _package_name) = find_root_package().expect("Failed to find root package");
 
             // TODO Add safety /dependency lints here
             lint_project(&package_root).await.unwrap_or_else(|e| {
@@ -221,9 +231,9 @@ pub struct NewArgs {
 #[command(name = "cargo")]
 #[command(bin_name = "cargo")]
 #[command(styles = CLAP_STYLING)]
-enum faasta {
+enum Faasta {
     #[command(name = "faasta")]
-    faasta(Cli),
+    Faasta(Cli),
 }
 
 #[derive(Args, Debug)]
