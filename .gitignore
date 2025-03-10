@@ -1,8 +1,10 @@
 /faasta-hmac-secret
 /server/functions
 /server/builds
+/builds
 .aider*
 target/*
 /target
 .DS_Store
 
+user_data/*

@@ -1,23 +1,28 @@
 mod init;
+mod github_oauth;
 #[cfg(test)]
 mod test_build;
 
 use faasta_analyze::lint_project;
 use anyhow::Error;
-use reqwest::{multipart, Client};
+use reqwest::{header, multipart, Client};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::fs;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 use faasta_analyze::build_project;
 use std::process::{exit, Command};
 use std::{env, fmt};
-use faasta_analyze::{analyze_cargo_file, analyze_rust_file};
 use walkdir::WalkDir;
 use zip::write::{ExtendedFileOptions, FileOptions};
 use zip::{CompressionMethod, ZipWriter};
 
 const UPLOAD_URL: &str = "http://127.0.0.1:8080/upload";
 const INVOKE_URL: &str = "http://127.0.0.1:8080/";
+const MAX_PROJECTS_PER_USER: usize = 10;
+const CONFIG_DIR: &str = ".faasta";
+const CONFIG_FILE: &str = "config.json";
 
 #[derive(Debug)]
 enum CustomError {
@@ -45,12 +50,73 @@ impl fmt::Display for CustomError {
         }
     }
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct FaastaConfig {
+    github_username: Option<String>,
+    github_token: Option<String>,
+}
+
+impl Default for FaastaConfig {
+    fn default() -> Self {
+        Self {
+            github_username: None,
+            github_token: None,
+        }
+    }
+}
+
+/// Get the configuration directory
+fn get_config_dir() -> PathBuf {
+    let home_dir = dirs::home_dir().expect("Could not find home directory");
+    home_dir.join(CONFIG_DIR)
+}
+
+/// Load the config file or create a new one
+fn load_config() -> Result<FaastaConfig, Error> {
+    let config_dir = get_config_dir();
+    let config_path = config_dir.join(CONFIG_FILE);
+    
+    // Create directory if it doesn't exist
+    if !config_dir.exists() {
+        fs::create_dir_all(&config_dir)?;
+    }
+    
+    // Read or create config file
+    if config_path.exists() {
+        let config_str = fs::read_to_string(&config_path)?;
+        Ok(serde_json::from_str(&config_str).unwrap_or_default())
+    } else {
+        let default_config = FaastaConfig::default();
+        let config_str = serde_json::to_string_pretty(&default_config)?;
+        fs::write(&config_path, config_str)?;
+        Ok(default_config)
+    }
+}
+
+/// Save the configuration
+fn save_config(config: &FaastaConfig) -> Result<(), Error> {
+    let config_dir = get_config_dir();
+    let config_path = config_dir.join(CONFIG_FILE);
+    
+    // Create directory if it doesn't exist
+    if !config_dir.exists() {
+        fs::create_dir_all(&config_dir)?;
+    }
+    
+    // Write config
+    let config_str = serde_json::to_string_pretty(config)?;
+    fs::write(&config_path, config_str)?;
+    
+    Ok(())
+}
+
 /// Recursively walk the given `project_path` and upload all files (including `Cargo.toml`, `src/` content, etc.).
 /// Each file is added to the multipart form with a field name that is the **relative path** from `project_path`.
 /// Zips up the local project (skipping `target/` and build scripts)
 /// and uploads it as a single multipart form field named `"archive"`.
-pub async fn upload_project() -> Result<String, Error> {
-    let (package_root, _package_name) = find_root_package().unwrap();
+pub async fn upload_project(github_config: Option<(String, String)>) -> Result<String, Error> {
+    let (package_root, package_name) = find_root_package().unwrap();
 
     // 1) Create an in-memory buffer that we'll write the zip to.
     let mut buffer = Vec::new();
@@ -89,15 +155,6 @@ pub async fn upload_project() -> Result<String, Error> {
                 continue;
             }
 
-            // if path.ends_with(".rs") {
-            //     analyze_rust_file(&path.to_str().unwrap()).await?;
-            // }
-
-            // // TODO sanitizize cargo.tomls
-            // if path.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
-            //     analyze_cargo_file(&path.to_str().unwrap())?;
-            // }
-
             // Derive the relative path from package_root so we can store that
             // exact path in the zip. For example, `src/main.rs`.
             let relative_path = match path.strip_prefix(&package_root) {
@@ -125,27 +182,31 @@ pub async fn upload_project() -> Result<String, Error> {
     let zip_part = multipart::Part::bytes(buffer)
         // The actual filename on the server is up to you;
         // you can name it e.g. `<crate_name>.zip` or "project.zip"
-        .file_name(format!("{}.zip", _package_name));
+        .file_name(format!("{}.zip", package_name));
 
     let form = multipart::Form::new()
         .part("archive", zip_part);
 
     // 4) Send the POST request with our zip file in the form
-    let url = format!("{}/{}", UPLOAD_URL, _package_name);
-    let response = client
-        .post(&url)
-        .multipart(form)
-        .send()
-        .await?;
+    let url = format!("{}/{}", UPLOAD_URL, package_name);
+    let mut request = client.post(&url).multipart(form);
+    
+    // Add GitHub authentication if available
+    if let Some((username, token)) = github_config {
+        request = request
+            .header("X-GitHub-Username", username)
+            .header(header::AUTHORIZATION, token);
+    }
+    
+    let response = request.send().await?;
 
     // 5) Return the response body as text, or handle it however needed
     let text = response.text().await?;
     println!("Server response: {text}");
-    println!("Function URL: {}", INVOKE_URL.to_string()  + &_package_name);
+    println!("Function URL: {}{}", INVOKE_URL, package_name);
 
     Ok(text)
 }
-
 
 use clap::{Args, Parser, Subcommand};
 
@@ -155,7 +216,7 @@ async fn main() {
     let Faasta::Faasta(cli) = Faasta::parse();
 
     match cli.command {
-        Commands::Deploy(_args) => {
+        Commands::Deploy(args) => {
             let spinner = indicatif::ProgressBar::new_spinner();
             spinner.set_message("Linting project...");
             spinner.enable_steady_tick(std::time::Duration::from_millis(100));
@@ -167,7 +228,32 @@ async fn main() {
             });
 
             spinner.set_message("Deploying project...");
-            upload_project().await.unwrap_or_else(|e| {
+            
+            // Load GitHub config for authentication
+            let github_config = if args.skip_auth {
+                None
+            } else {
+                match load_config() {
+                    Ok(config) => {
+                        match (config.github_username, config.github_token) {
+                            (Some(username), Some(token)) => Some((username, token)),
+                            _ => {
+                                spinner.finish_and_clear();
+                                println!("No GitHub credentials found. Run 'cargo faasta login' to set up authentication.");
+                                // println!("Or use --skip-auth to deploy without authentication (limited to one function).");
+                                exit(1);
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        spinner.finish_and_clear();
+                        eprintln!("Failed to load config: {}", e);
+                        exit(1);
+                    }
+                }
+            };
+            
+            upload_project(github_config).await.unwrap_or_else(|e| {
                 spinner.finish_and_clear();
                 eprintln!("Failed to deploy project: {}", e);
                 exit(1);
@@ -187,6 +273,7 @@ async fn main() {
                     exit(1);
                 });
         }
+        
         Commands::Init => {
             let _package_name = "".to_string();
 
@@ -208,6 +295,7 @@ async fn main() {
                 exit(1);
             }
         },
+        
         Commands::Build(build_args) => {
             let spinner = indicatif::ProgressBar::new_spinner();
             spinner.set_message("Building project...");
@@ -247,7 +335,28 @@ async fn main() {
             // If deploy flag is specified, deploy the function
             if build_args.deploy {
                 spinner.set_message("Deploying function to server...");
-                match upload_project().await {
+                
+                // Load GitHub config for authentication
+                let github_config = match load_config() {
+                    Ok(config) => {
+                        match (config.github_username, config.github_token) {
+                            (Some(username), Some(token)) => Some((username, token)),
+                            _ => {
+                                spinner.finish_and_clear();
+                                println!("No GitHub credentials found. Run 'cargo faasta login' to set up authentication.");
+                                // println!("Or use 'cargo faasta deploy --skip-auth' to deploy without authentication (limited to one function).");
+                                None
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        spinner.finish_and_clear();
+                        eprintln!("Failed to load config: {}", e);
+                        None
+                    }
+                };
+                
+                match upload_project(github_config).await {
                     Ok(_) => {
                         spinner.finish_and_clear();
                         println!("✅ Function '{}' deployed successfully", package_name);
@@ -267,14 +376,95 @@ async fn main() {
             }
         }
 
+        Commands::Login(login_args) => {
+            // Load existing config or create a new one
+            let mut config = match load_config() {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    eprintln!("Failed to load config: {}", e);
+                    exit(1);
+                }
+            };
 
+            if login_args.manual {
+                // Manual login mode - for users who prefer direct token input
+                // Set GitHub username
+                if let Some(username) = login_args.username {
+                    config.github_username = Some(username);
+                } else if config.github_username.is_none() {
+                    eprintln!("GitHub username required. Use --username to provide it.");
+                    exit(1);
+                }
+                
+                // Set GitHub token
+                if let Some(token) = login_args.token {
+                    config.github_token = Some(token);
+                } else if config.github_token.is_none() {
+                    eprintln!("GitHub token required. Use --token to provide it.");
+                    exit(1);
+                }
+                
+                // Save the config
+                match save_config(&config) {
+                    Ok(_) => {
+                        println!("GitHub credentials saved successfully.");
+                        println!("You can now deploy up to {} projects.", MAX_PROJECTS_PER_USER);
+                    },
+                    Err(e) => {
+                        eprintln!("Failed to save config: {}", e);
+                        exit(1);
+                    }
+                }
+            } else {
+                // Interactive OAuth flow
+                match crate::github_oauth::github_oauth_flow().await {
+                    Ok((username, token)) => {
+                        config.github_username = Some(username);
+                        config.github_token = Some(token);
+                        
+                        match save_config(&config) {
+                            Ok(_) => {
+                                println!("✅ GitHub authentication successful!");
+                                println!("You can now deploy up to {} projects.", MAX_PROJECTS_PER_USER);
+                            },
+                            Err(e) => {
+                                eprintln!("Failed to save config: {}", e);
+                                exit(1);
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("GitHub authentication failed: {}", e);
+                        eprintln!("Try again or use manual login: cargo faasta login --manual --username <user> --token <token>");
+                        exit(1);
+                    }
+                }
+            }
+        }
     }
 }
+
 #[derive(Args, Debug)]
 pub struct NewArgs {
     /// The name of the package to create
     package_name: String,
 }
+
+#[derive(Args, Debug)]
+pub struct LoginArgs {
+    /// GitHub username (only needed for manual login)
+    #[arg(long)]
+    username: Option<String>,
+    
+    /// GitHub token (only needed for manual login)
+    #[arg(long)]
+    token: Option<String>,
+    
+    /// Skip browser OAuth flow and manually provide credentials
+    #[arg(long)]
+    manual: bool,
+}
+
 #[derive(Parser)] // requires `derive` feature
 #[command(name = "cargo")]
 #[command(bin_name = "cargo")]
@@ -302,12 +492,18 @@ enum Commands {
     New(NewArgs),
     /// Build the function (and optionally deploy it)
     Build(BuildArgs),
+    /// Set up GitHub authentication
+    Login(LoginArgs),
 }
 
 #[derive(Args, Debug)]
 struct DeployArgs {
     /// Path to the project to deploy
     path: Option<String>,
+    
+    /// Skip GitHub authentication
+    #[arg(long)]
+    skip_auth: bool,
 }
 
 #[derive(Args, Debug)]

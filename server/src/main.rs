@@ -1,11 +1,17 @@
 mod build_tooling;
+mod github_auth;
 mod metrics;
 
-use std::cmp::max;
 use crate::build_tooling::{generate_hmac, handle_upload_and_build};
+use crate::github_auth::GitHubAuth;
+use std::cmp::max;
+use std::env;
+use std::sync::Arc;
+
 use axum::body::Body;
 use axum::error_handling::HandleErrorLayer;
 use axum::extract::Path;
+use axum::extract::State;
 use axum::response::Response;
 use axum::{
     body::Bytes,
@@ -32,7 +38,7 @@ use tower::timeout::TimeoutLayer;
 use tower::{timeout, ServiceBuilder};
 use tower_http::catch_panic::CatchPanicLayer;
 
-// type HandleRequestFn = fn(Method, Uri, HeaderMap, Bytes) -> Response;
+// Type for function handling requests
 type HandleRequestFn =
 extern "Rust" fn(
     Method,
@@ -42,9 +48,12 @@ extern "Rust" fn(
     Dir,
 ) -> Pin<Box<dyn Future<Output=Response<Body>> + Send + 'static>>;
 
+// Cache for loaded libraries
 lazy_static! {
     static ref LIB_CACHE: DashMap<String, LoadedFunction> = DashMap::new();
 }
+
+// Structure to track loaded functions and their usage
 struct LoadedFunction {
     handle_fn: HandleRequestFn, // the symbol as a raw function pointer
     usage_count: AtomicUsize,
@@ -59,13 +68,21 @@ impl LoadedFunction {
     }
 }
 
+// Application state
+#[derive(Clone)]
+struct AppState {
+    github_auth: Arc<GitHubAuth>,
+}
+
+// Handle function invocation
 async fn handle_invoke_rs(
+    State(_state): State<AppState>,
     Path(function_name): Path<String>,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
     body: Bytes,
-) -> impl IntoResponse {
+) -> Response<Body> {
     // attempt to fetch from the cache
     let loaded_fn = match LIB_CACHE.get(&function_name) {
         Some(loaded) => loaded,
@@ -85,8 +102,10 @@ async fn handle_invoke_rs(
             };
 
             // Generate the symbol name (e.g. "dy_...")
-            let secret = include_str!("../../faasta-hmac-secret");
-            let hmac = "dy_".to_string() + &*generate_hmac(&*function_name, secret);
+            let secret = env::var("FAASTA_HMAC_SECRET").unwrap_or_else(|_| "faasta-dev-secret-key".to_string());
+            let hmac = "dy_".to_string() + &*generate_hmac(&*function_name, &secret);
+            
+            // Note: GitHub auth is only needed for upload, not for invoke
 
             // Safely look up the symbol *once*
             let symbol: Symbol<HandleRequestFn> = unsafe {
@@ -146,8 +165,60 @@ async fn handle_invoke_rs(
     response
 }
 
+// Modified upload handler to integrate with GitHub auth
+async fn handle_upload_with_auth(
+    State(state): State<AppState>,
+    path: Path<String>,
+    headers: HeaderMap,
+    multipart: axum::extract::Multipart,
+) -> impl IntoResponse {
+    // Check GitHub authentication
+    let github_username = match headers.get("X-GitHub-Username").and_then(|h| h.to_str().ok()) {
+        Some(username) => username,
+        None => return (StatusCode::UNAUTHORIZED, "GitHub username required").into_response(),
+    };
+    
+    let auth_token = match headers.get("Authorization").and_then(|h| h.to_str().ok()) {
+        Some(token) => token,
+        None => return (StatusCode::UNAUTHORIZED, "Authorization header required").into_response(),
+    };
+    
+    // Validate the GitHub authentication using OAuth token
+    match state.github_auth.validate_oauth_token(github_username, auth_token).await {
+        Ok(true) => {},
+        Ok(false) => return (StatusCode::UNAUTHORIZED, "Invalid GitHub authentication").into_response(),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate GitHub authentication").into_response(),
+    };
+    
+    // Check if user can upload more projects
+    let function_name = path.0;
+    if !state.github_auth.can_upload_project(github_username, &function_name) {
+        return (
+            StatusCode::FORBIDDEN, 
+            format!("You have reached the maximum limit of {} projects", 10)
+        ).into_response();
+    }
+    
+    // Generate HMAC for function validation
+    let secret = env::var("FAASTA_HMAC_SECRET").unwrap_or_else(|_| "faasta-dev-secret-key".to_string());
+    let hmac = generate_hmac(&function_name, &secret);
+    
+    // Process the upload and get the response
+    let build_result = handle_upload_and_build(Path(function_name.clone()), multipart).await;
+    
+    // Convert to response to check the status
+    let response = build_result.into_response();
+    
+    // Only register the project if the build was successful
+    if response.status() == StatusCode::OK {
+        let _ = state.github_auth.add_project(github_username, &function_name, &hmac).await;
+    }
+    
+    // Return the build result (convert it to the correct response type)
+    response
+}
 
-
+// Error handler for timeouts
 #[derive(Debug)]
 struct TimeoutError {
     message: String,
@@ -183,127 +254,78 @@ async fn handle_timeout_error(error: BoxError) -> TimeoutError {
         TimeoutError::new(format!("Unhandled error: {}", error))
     }
 }
-// type LibCache = CHashMap<String, (Library, AtomicUsize)>;
-// #[derive(Clone)]
-// struct AppState {
-//     // total_requests: AtomicUsize,
-//     // total_time: AtomicUsize,
-//     // average_time: AtomicUsize,
-//     libs: LibCache,
-// }
+
 #[tokio::main]
 async fn main() {
+    // Initialize GitHub App authentication
+    println!("Initializing GitHub App authentication...");
+    
+    // Get GitHub App configuration from file in server directory
+    let private_key = match fs::read("server/faasta-auth.2025-03-09.private-key.pem").await {
+        Ok(key) => key,
+        Err(_) => {
+            // For development, use a dummy key
+            println!("WARNING: Using dummy GitHub private key for development");
+            b"dev-private-key".to_vec()
+        }
+    };
+    
+    let app_id = match env::var("GITHUB_APP_ID") {
+        Ok(id) => id.parse::<u64>().unwrap_or(1172104),
+        Err(_) => {
+            println!("WARNING: Using default GitHub App ID for development");
+            1 // Default for development
+        }
+    };
+    
+    let installation_id = match env::var("GITHUB_INSTALLATION_ID") {
+        Ok(id) => id.parse::<u64>().unwrap_or(1),
+        Err(_) => {
+            println!("WARNING: Using default GitHub Installation ID for development");
+            1 // Default for development
+        }
+    };
+    
+    // Create GitHub auth instance
+    let github_auth = match GitHubAuth::new().await {
+        Ok(auth) => {
+            println!("GitHub App authentication initialized successfully");
+            Arc::new(auth)
+        },
+        Err(e) => {
+            eprintln!("Failed to initialize GitHub App authentication: {}", e);
+            eprintln!("Continuing without GitHub authentication");
+            // Create a default instance for development
+            Arc::new(GitHubAuth::new().await.unwrap())
+        }
+    };
+    
+    // Create the app state
+    let state = AppState {
+        github_auth,
+    };
+    
+    // Setup the service middleware
     let service = ServiceBuilder::new()
         .layer(CatchPanicLayer::new())
         .layer(HandleErrorLayer::new(handle_timeout_error))
         .layer(TimeoutLayer::new(Duration::from_secs(900)));
+    
+    // Setup routes
     let app = Router::new()
-        // POST /upload
         .route("/metrics", get(metrics::get_metrics))
-        .route("/upload/{function_name}", post(handle_upload_and_build))
-        // .route("/upload", post(handle_upload))
-        // GET /invoke/{function_name}
+        .route("/upload/{function_name}", post(handle_upload_with_auth))
         .route(
             "/{function_name}",
             get(handle_invoke_rs).post(handle_invoke_rs),
         )
-        .layer(service);
+        .layer(service)
+        .with_state(state);
 
+    // Start the server
+    println!("Starting server on 0.0.0.0:8080...");
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
     axum::serve(listener, app.into_make_service())
         .await
         .unwrap();
 }
-
-//
-// pub async fn handle_timeout_error(err: BoxError) -> AppError {
-//     if err.is::<timeout::error::Elapsed>() {
-//         AppError::RequestTimeout
-//     } else {
-//         AppError::Unexpected(err)
-//     }
-// }
-// type HandleRequestCFn = unsafe extern "C" fn(*const RequestInfo) -> *mut ResponseInfo;
-//
-// async fn handle_invoke_c_compat(
-//     Path(function_name): Path<String>,
-//     method: Method,
-//     uri: Uri,
-//     headers: HeaderMap,
-//     body: Bytes,
-// ) -> impl IntoResponse {
-//     // 1. Read the entire request body
-//     // 2. Convert strings to CStrings
-//     let method_c = CString::new(method.to_string()).unwrap();
-//     let uri_string = uri.to_string();
-//     let func_name = match uri_string.split_once("/") {
-//         None => uri_string,
-//         Some(it) => it.0.to_string()
-//     };
-//     let uri_c = CString::new(uri.to_string()).unwrap();
-//     let path_c = CString::new(uri.path().to_string()).unwrap();
-//     let query_c = uri
-//         .query()
-//         .map(|q| CString::new(q).unwrap())
-//         .unwrap_or_else(|| CString::new("").unwrap());
-//
-//     // 3. Build an array of KeyValuePair for headers
-//     let mut kv_pairs: Vec<KeyValuePair> = Vec::with_capacity(headers.len());
-//     let mut cstrings_holder = Vec::new(); // to hold the memory for the CStrings
-//     for (name, value) in headers.iter() {
-//         let key_c = CString::new(name.as_str()).unwrap();
-//         let val_c = CString::new(value.to_str().unwrap()).unwrap();
-//         kv_pairs.push(KeyValuePair {
-//             key: key_c.as_ptr(),
-//             value: val_c.as_ptr(),
-//         });
-//         // We must keep these CStrings alive until after the call
-//         cstrings_holder.push(key_c);
-//         cstrings_holder.push(val_c);
-//     }
-//
-//     // 4. Construct RequestInfo
-//     let req_info = RequestInfo {
-//         method: method_c.as_ptr(),
-//         uri: uri_c.as_ptr(),
-//         path: path_c.as_ptr(),
-//         query: query_c.as_ptr(),
-//         headers: kv_pairs.as_ptr(),
-//         headers_len: kv_pairs.len(),
-//         body: body.as_ptr(),
-//         body_len: body.len(),
-//     };
-//
-//     // 5. Load library and symbol
-//     let lib = unsafe { Library::new("uploads/".to_string() + &*function_name + ".dylib") }.unwrap();
-//     let handle_request: Symbol<HandleRequestCFn> = unsafe { lib.get(b"handle_request") }.unwrap();
-//
-//     // 6. Call the function
-//     let resp_ptr = unsafe { handle_request(&req_info as *const RequestInfo) };
-//     if resp_ptr.is_null() {
-//         return (StatusCode::INTERNAL_SERVER_ERROR, "null response").into_response();
-//     }
-//
-//     // 7. Convert *mut ResponseInfo back to a Box, so we can safely access and eventually free it
-//     let resp_box = unsafe { Box::from_raw(resp_ptr) };
-//
-//     // 8. Extract data
-//     let status_code = resp_box.status_code;
-//     let body_ptr = resp_box.body;
-//     let _body_len = resp_box.body_len; // if you set this, you can read raw bytes
-//
-//     // 9. Convert the returned body pointer to a String
-//     let body_str = if !body_ptr.is_null() {
-//         let c_slice = unsafe { CStr::from_ptr(body_ptr) };
-//         let s = c_slice.to_string_lossy().to_string();
-//         // The library allocated this string, so we should free it if it used `CString::into_raw()`
-//         // But we have no direct pointer to free unless we define a separate `free_string` export
-//         // or we embedded the logic in handle_request.
-//         s
-//     } else {
-//         "".to_string()
-//     };
-// // 10. Return the response
-// let sc = StatusCode::from_u16(status_code).unwrap_or(StatusCode::OK);
-// (sc, body_str).into_response()
-// }

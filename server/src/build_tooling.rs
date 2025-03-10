@@ -34,10 +34,10 @@ pub async fn handle_upload_and_build(
     }
     dbg!(&function_name);
 
-    let secret = include_str!("../../faasta-hmac-secret");
+    let secret = std::env::var("FAASTA_HMAC_SECRET").unwrap_or_else(|_| "faasta-dev-secret-key".to_string());
     // Create a unique project directory based on the function name
     let project_dir = PathBuf::from(BUILDS_DIRECTORY).join(&function_name);
-    let _hmac = generate_hmac(&function_name, secret);
+    let _hmac = generate_hmac(&function_name, &secret);
 
     // Ensure the project directory exists
     if let Err(e) = fs::create_dir_all(&project_dir).await {
@@ -137,7 +137,6 @@ pub async fn handle_upload_and_build(
     let dir = project_dir.clone();
     if let Err(e) = tokio::task::spawn_blocking(move || {
         tokio::runtime::Handle::current().block_on(async move {
-            lint_project(&dir).await?;
             build_project(&dir).await
         })
     }).await.unwrap() {
@@ -158,16 +157,20 @@ pub async fn handle_upload_and_build(
         "so"
     };
 
-    let target_release =
-        project_dir.join(format!("../target/release/lib{function_name}.{extension}"));
+    // Use absolute path to target directory
+    let target_dir = project_dir.parent().unwrap_or(&project_dir).join("target");
+    let target_release = target_dir.join(format!("release/lib{function_name}.{extension}"));
+    println!("Looking for built library at: {:?}", &target_release);
+    
     // stat
-    let library_path = fs::metadata(&target_release)
+    let target_release_clone = target_release.clone();
+    let library_path = fs::metadata(&target_release_clone)
         .await
         .map(|_| target_release)
         .ok();
 
     let Some(lib_path) = library_path else {
-        // eprintln!("No library found in release directory: {}", target_release);
+        eprintln!("No library found in release directory: {:?}", target_release_clone);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to locate compiled library",

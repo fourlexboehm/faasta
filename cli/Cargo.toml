@@ -3,6 +3,10 @@ name = "cargo-faasta"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "cargo_faasta"
+path = "src/lib.rs"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -10,12 +14,18 @@ anyhow.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
 zip.workspace = true
-reqwest = { version = "0.12.12", features = ["blocking","stream","multipart","json"] }
+reqwest = { version = "0.12.12", features = ["blocking", "stream", "multipart", "json"] }
 walkdir = "2.5.0"
 faasta-analyze = { path = "../analyze" }
 clap = { version = "4", features = ["derive"] }
 clap-cargo = "0.15.1"
 indicatif = "0.17.11"
+dirs = "5.0.1"
+serde = { version = "1.0", features = ["derive"] }
+oauth2 = "4.4.2"
+open = "5.0.1"
+tiny_http = "0.12.0"
+url = "2.5.0"
 
 [dev-dependencies]
 tempfile = "3.10.1"

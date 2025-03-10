@@ -507,15 +507,14 @@ pub async fn build_project(project_dir: &std::path::Path) -> std::result::Result
     
     info!("Security checks passed, proceeding with build");
     
-    // Set up build environment that restricts network access if possible
-    // (This would be platform-specific; this is a placeholder)
-
+    // Create an absolute path for the target directory
+    let target_dir = project_dir.parent().unwrap_or(project_dir).join("target");
 
     let output = Command::new("cargo")
         .arg("build")
         .arg("--release")
         .arg("--target-dir")
-        .arg("../target")
+        .arg(target_dir)
         .env("FAASTA_HMAC_SECRET",  include_str!("../../faasta-hmac-secret"))
         .current_dir(project_dir)
         .output()

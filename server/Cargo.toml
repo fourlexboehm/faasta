@@ -15,6 +15,9 @@ edition = "2021"
 anyhow.workspace = true
 tokio.workspace = true
 zip.workspace = true
+serde_json.workspace = true
+github-app-auth = "3.0.1"
+reqwest = { version = "0.11", features = ["json"] }
 futures = { version = "0.3.31", default-features = false }
 libloading = "0.8.6"
 tower-http = {version = "0.6", features = ["catch-panic"]}
