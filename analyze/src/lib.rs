@@ -2,7 +2,7 @@
 use anyhow::Result;
 use geiger::{find_unsafe_in_string, IncludeTests};
 use lazy_static::lazy_static;
-use std::collections::HashSet;
+use std::{collections::HashSet, env::current_dir};
 use std::fs;
 use tokio::process::Command;
 use syn::{visit::Visit, Attribute, Path, Item, UseTree, Expr, ExprCall};
@@ -508,13 +508,13 @@ pub async fn build_project(project_dir: &std::path::Path) -> std::result::Result
     info!("Security checks passed, proceeding with build");
     
     // Create an absolute path for the target directory
-    let target_dir = project_dir.parent().unwrap_or(project_dir).join("target");
+    // let target_dir = project_dir.parent().unwrap_or(project_dir).join("target");
 
     let output = Command::new("cargo")
         .arg("build")
         .arg("--release")
         .arg("--target-dir")
-        .arg(target_dir)
+        .arg("../target")
         .env("FAASTA_HMAC_SECRET",  include_str!("../../faasta-hmac-secret"))
         .current_dir(project_dir)
         .output()

@@ -259,33 +259,7 @@ async fn handle_timeout_error(error: BoxError) -> TimeoutError {
 async fn main() {
     // Initialize GitHub App authentication
     println!("Initializing GitHub App authentication...");
-    
-    // Get GitHub App configuration from file in server directory
-    let private_key = match fs::read("server/faasta-auth.2025-03-09.private-key.pem").await {
-        Ok(key) => key,
-        Err(_) => {
-            // For development, use a dummy key
-            println!("WARNING: Using dummy GitHub private key for development");
-            b"dev-private-key".to_vec()
-        }
-    };
-    
-    let app_id = match env::var("GITHUB_APP_ID") {
-        Ok(id) => id.parse::<u64>().unwrap_or(1172104),
-        Err(_) => {
-            println!("WARNING: Using default GitHub App ID for development");
-            1 // Default for development
-        }
-    };
-    
-    let installation_id = match env::var("GITHUB_INSTALLATION_ID") {
-        Ok(id) => id.parse::<u64>().unwrap_or(1),
-        Err(_) => {
-            println!("WARNING: Using default GitHub Installation ID for development");
-            1 // Default for development
-        }
-    };
-    
+   
     // Create GitHub auth instance
     let github_auth = match GitHubAuth::new().await {
         Ok(auth) => {
