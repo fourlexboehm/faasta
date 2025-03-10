@@ -195,7 +195,6 @@ disallowed-methods = [
     "rustix::net::connect_any",
     "rustix::net::sendto",
 
-    ## TODO ADD tokio methods
     # Use cap-async-std instead.
     "tokio::fs::canonicalize",
     "tokio::fs::copy",

@@ -25,6 +25,13 @@ pub async fn handle_upload_and_build(
     AxumPath(function_name): AxumPath<String>,
     mut multipart: Multipart,
 ) -> impl IntoResponse {
+    if !path_is_valid(&function_name) {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Invalid function name".to_owned(),
+        )
+            .into_response();
+    }
     dbg!(&function_name);
 
     let secret = include_str!("../../faasta-hmac-secret");
@@ -127,24 +134,18 @@ pub async fn handle_upload_and_build(
         }
         Err(_) => {}
     }
-
-    if let Err(e) = lint_project(&project_dir).await {
-        eprintln!("Failed to lint project: {}", e);
+    let dir = project_dir.clone();
+    if let Err(e) = tokio::task::spawn_blocking(move || {
+        tokio::runtime::Handle::current().block_on(async move {
+            lint_project(&dir).await?;
+            build_project(&dir).await
+        })
+    }).await.unwrap() {
+        eprintln!("Failed to lint or build project: {}", e);
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Your code contains illegal symbols: ".to_owned() + &e.to_string(),
-        )
-            .into_response();
-    }
-
-    // Build the project
-    if let Err(e) = build_project(&project_dir).await {
-        eprintln!("Failed to build project: {}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to build project: ".to_owned() + &e.to_string(),
-        )
-            .into_response();
+            format!("Failed to build project: {}", e),
+        ).into_response();
     }
 
     let extension = if cfg!(target_os = "linux") {
@@ -290,21 +291,40 @@ async fn save_field_to_file(
     Ok(())
 }
 
-/// Simple path validation that ensures the path consists of exactly one "normal" component.
-/// This prevents directory traversal attempts like `../../secret`.
+/// Improved path validation that ensures the path:
+/// 1. consists of exactly one "normal" component
+/// 2. contains no directory traversal characters
+/// 3. only contains alphanumeric characters, underscores, and hyphens
+/// 4. is not empty
+/// This prevents directory traversal attempts like `../../secret` and other path-based attacks.
 fn path_is_valid(path: &str) -> bool {
-    let path = Path::new(path);
-    let mut components = path.components().peekable();
+    // Check for empty paths
+    if path.is_empty() {
+        return false;
+    }
+    
+    // Check for disallowed characters
+    if path.contains("..") || path.contains('/') || path.contains('\\') {
+        return false;
+    }
+    
+    // Ensure the path only contains alphanumeric, underscores, and hyphens
+    if !path.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+        return false;
+    }
+
+    // Use path components check as an additional layer of security
+    let path_obj = Path::new(path);
+    let mut components = path_obj.components().peekable();
 
     if let Some(first) = components.peek() {
-        // If the first component is not normal, reject.
-        // i.e., no leading slashes, no references to current/parent dirs, etc.
+        // If the first component is not normal, reject
         if !matches!(first, std::path::Component::Normal(_)) {
             return false;
         }
     }
 
-    // Ensure there's exactly 1 component total.
+    // Ensure there's exactly 1 component total
     components.count() == 1
 }
 

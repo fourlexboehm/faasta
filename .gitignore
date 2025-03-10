@@ -1,2 +1,8 @@
 /faasta-hmac-secret
-/server/functions/function
+/server/functions
+/server/builds
+.aider*
+target/*
+/target
+.DS_Store
+

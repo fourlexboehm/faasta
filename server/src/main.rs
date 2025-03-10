@@ -26,7 +26,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use cap_async_std::{ambient_authority, AmbientAuthority};
+use cap_async_std::ambient_authority;
 use tokio::fs;
 use tower::timeout::TimeoutLayer;
 use tower::{timeout, ServiceBuilder};
@@ -46,15 +46,13 @@ lazy_static! {
     static ref LIB_CACHE: DashMap<String, LoadedFunction> = DashMap::new();
 }
 struct LoadedFunction {
-    library: Library,
     handle_fn: HandleRequestFn, // the symbol as a raw function pointer
     usage_count: AtomicUsize,
 }
 
 impl LoadedFunction {
-    fn new(library: Library, handle_fn: HandleRequestFn) -> Self {
+    fn new(handle_fn: HandleRequestFn) -> Self {
         Self {
-            library,
             handle_fn,
             usage_count: AtomicUsize::new(0),
         }
@@ -104,7 +102,7 @@ async fn handle_invoke_rs(
             let handle_fn = *symbol;
 
             // Store in the map
-            let inserted = LoadedFunction::new(new_lib, handle_fn);
+            let inserted = LoadedFunction::new(handle_fn);
             LIB_CACHE.insert(function_name.clone(), inserted);
 
             // get a fresh reference from the map
@@ -116,6 +114,9 @@ async fn handle_invoke_rs(
 
     // Prepare your sandbox if needed
     let path = format!("./sandbox/{function_name}");
+    if !fs::try_exists(&path).await.unwrap() {
+        fs::create_dir_all(&path).await.unwrap();
+    }
     let sandbox = Dir::open_ambient_dir(&path, ambient_authority()).await.unwrap();
 
     // Then call the function pointer directly

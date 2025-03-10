@@ -52,8 +52,8 @@ fn write_files(
     let updated_cargo_toml = rewrite_package_name(cargo_toml_str, package_name);
     fs::write(cargo_toml_path, updated_cargo_toml)?;
 
-    // 2. Write src/main.rs
-    let main_rs_path = project_dir.join("src").join("main.rs");
+    // 2. Write src/lib.rs
+    let main_rs_path = project_dir.join("src").join("lib.rs");
     fs::write(main_rs_path, main_rs_str)?;
 
     Ok(())

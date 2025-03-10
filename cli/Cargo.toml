@@ -6,7 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
 anyhow.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
@@ -16,3 +15,9 @@ walkdir = "2.5.0"
 faasta-analyze = { path = "../analyze" }
 clap = { version = "4", features = ["derive"] }
 clap-cargo = "0.15.1"
+indicatif = "0.17.11"
+
+[dev-dependencies]
+tempfile = "3.10.1"
+assert_cmd = "2.0.14"
+predicates = "3.1.0"

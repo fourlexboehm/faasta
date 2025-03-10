@@ -1,4 +1,6 @@
 mod init;
+#[cfg(test)]
+mod test_build;
 
 use faasta_analyze::lint_project;
 use anyhow::Error;
@@ -87,14 +89,14 @@ pub async fn upload_project() -> Result<String, Error> {
                 continue;
             }
 
-            if path.ends_with(".rs") {
-                analyze_rust_file(&path.to_str().unwrap()).await?;
-            }
+            // if path.ends_with(".rs") {
+            //     analyze_rust_file(&path.to_str().unwrap()).await?;
+            // }
 
-            // TODO sanitizize cargo.tomls
-            if path.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
-                analyze_cargo_file(&path.to_str().unwrap())?;
-            }
+            // // TODO sanitizize cargo.tomls
+            // if path.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
+            //     analyze_cargo_file(&path.to_str().unwrap())?;
+            // }
 
             // Derive the relative path from package_root so we can store that
             // exact path in the zip. For example, `src/main.rs`.
@@ -153,7 +155,7 @@ async fn main() {
     let Faasta::Faasta(cli) = Faasta::parse();
 
     match cli.command {
-        Commands::Upload(_args) => {
+        Commands::Deploy(_args) => {
             let spinner = indicatif::ProgressBar::new_spinner();
             spinner.set_message("Linting project...");
             spinner.enable_steady_tick(std::time::Duration::from_millis(100));
@@ -164,14 +166,17 @@ async fn main() {
                 exit(1);
             });
 
-            spinner.set_message("Uploading project...");
+            spinner.set_message("Deploying project...");
             upload_project().await.unwrap_or_else(|e| {
                 spinner.finish_and_clear();
-                eprintln!("Failed to upload project: {}", e);
+                eprintln!("Failed to deploy project: {}", e);
                 exit(1);
             });
 
+            let (_, package_name) = find_root_package().expect("Failed to find root package");
             spinner.finish_and_clear();
+            println!("✅ Function '{}' deployed successfully", package_name);
+            println!("Function URL: {}{}", INVOKE_URL, package_name);
         }
 
         Commands::Invoke(args) => {
@@ -203,20 +208,63 @@ async fn main() {
                 exit(1);
             }
         },
-        Commands::Build => {
-            let (package_root, _package_name) = find_root_package().expect("Failed to find root package");
+        Commands::Build(build_args) => {
+            let spinner = indicatif::ProgressBar::new_spinner();
+            spinner.set_message("Building project...");
+            spinner.enable_steady_tick(std::time::Duration::from_millis(100));
 
-            // TODO Add safety /dependency lints here
+            let (package_root, package_name) = find_root_package().expect("Failed to find root package");
+            
+            // Display project info
+            println!("Building project: {}", package_name);
+            println!("Project root: {}", package_root.display());
+            
+            // Validate the project structure
+            if !package_root.join("src").join("lib.rs").exists() {
+                spinner.finish_and_clear();
+                eprintln!("Error: src/lib.rs is missing. This file is required for FaaSta functions.");
+                eprintln!("Hint: Run 'cargo faasta new <name>' to create a new FaaSta project.");
+                exit(1);
+            }
+
+            // Run safety lints
+            spinner.set_message("Running security and safety checks...");
             lint_project(&package_root).await.unwrap_or_else(|e| {
-                eprintln!("Failed to lint project: {}", e);
+                spinner.finish_and_clear();
+                eprintln!("Failed security checks: {}", e);
+                eprintln!("Please fix the security issues and try again.");
                 exit(1);
             });
 
-
-            build_project(&env::current_dir().unwrap()).await.unwrap_or_else(|e| {
-                eprintln!("Failed to build project: {}", e);
+            // Build the project
+            spinner.set_message("Building optimized release binary...");
+            build_project(&package_root).await.unwrap_or_else(|e| {
+                spinner.finish_and_clear();
+                eprintln!("Build failed: {}", e);
                 exit(1);
             });
+
+            // If deploy flag is specified, deploy the function
+            if build_args.deploy {
+                spinner.set_message("Deploying function to server...");
+                match upload_project().await {
+                    Ok(_) => {
+                        spinner.finish_and_clear();
+                        println!("✅ Function '{}' deployed successfully", package_name);
+                        println!("Function URL: {}{}", INVOKE_URL, package_name);
+                    },
+                    Err(e) => {
+                        spinner.finish_and_clear();
+                        eprintln!("Deployment failed: {}", e);
+                        eprintln!("The build succeeded but deployment failed. You can deploy later with 'cargo faasta deploy'");
+                        exit(1);
+                    }
+                }
+            } else {
+                spinner.finish_and_clear();
+                println!("✅ Build successful!");
+                println!("Run 'cargo faasta deploy' to deploy your function.");
+            }
         }
 
 
@@ -244,19 +292,29 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Uploads a project to the server
-    Upload(UploadArgs),
+    /// Deploys a project to the server
+    Deploy(DeployArgs),
     /// Invokes a function with the specified name and argument
     Invoke(InvokeArgs),
+    /// Initialize a new project in the current directory
     Init,
+    /// Create a new project in a new directory
     New(NewArgs),
-    Build,
+    /// Build the function (and optionally deploy it)
+    Build(BuildArgs),
 }
 
 #[derive(Args, Debug)]
-struct UploadArgs {
-    /// Path to the project to upload
+struct DeployArgs {
+    /// Path to the project to deploy
     path: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct BuildArgs {
+    /// Deploy the function after building
+    #[arg(short, long)]
+    deploy: bool,
 }
 
 #[derive(Args, Debug)]
@@ -293,7 +351,7 @@ fn find_root_package() -> Result<(PathBuf, String), Box<dyn std::error::Error>> 
         .output()?;
 
     if !output.status.success() {
-        return Err("`cargo metadata` failed".into());
+        return Err("Failed to retrieve cargo metadata".into());
     }
 
     // Parse JSON
