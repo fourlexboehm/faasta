@@ -515,7 +515,6 @@ pub async fn build_project(project_dir: &std::path::Path) -> std::result::Result
         .arg("--release")
         .arg("--target-dir")
         .arg("../target")
-        .env("FAASTA_HMAC_SECRET",  include_str!("../../faasta-hmac-secret"))
         .current_dir(project_dir)
         .output()
         .await?;

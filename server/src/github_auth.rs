@@ -22,7 +22,6 @@ pub struct GitHubAuth {
 pub struct UserData {
     pub github_username: String,
     pub projects: Vec<String>,
-    pub hmac_signatures: HashMap<String, String>,
 }
 
 impl GitHubAuth {
@@ -93,7 +92,7 @@ impl GitHubAuth {
     }
     
     /// Add a project to a user's list
-    pub async fn add_project(&self, username: &str, project_name: &str, hmac: &str) -> Result<()> {
+    pub async fn add_project(&self, username: &str, project_name: &str) -> Result<()> {
         // Get or create user data
         let mut user_data = if let Some(data) = self.user_projects.get(username) {
             data.clone()
@@ -101,7 +100,6 @@ impl GitHubAuth {
             UserData {
                 github_username: username.to_string(),
                 projects: Vec::new(),
-                hmac_signatures: HashMap::new(),
             }
         };
         
@@ -109,9 +107,6 @@ impl GitHubAuth {
         if !user_data.projects.contains(&project_name.to_string()) {
             user_data.projects.push(project_name.to_string());
         }
-        
-        // Store the HMAC signature for this project
-        user_data.hmac_signatures.insert(project_name.to_string(), hmac.to_string());
         
         // Update the map
         self.user_projects.insert(username.to_string(), user_data.clone());
@@ -124,11 +119,9 @@ impl GitHubAuth {
     }
     
     /// Verify that a user owns a function using the stored HMAC
-    pub fn verify_function_ownership(&self, username: &str, function_name: &str, provided_hmac: &str) -> bool {
+    pub fn verify_function_ownership(&self, username: &str, function_name: &str) -> bool {
         if let Some(user_data) = self.user_projects.get(username) {
-            if let Some(stored_hmac) = user_data.hmac_signatures.get(function_name) {
-                return stored_hmac == provided_hmac;
-            }
+            return user_data.projects.contains(&function_name.to_string());
         }
         false
     }

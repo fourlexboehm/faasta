@@ -959,9 +959,8 @@ dependencies = [
 
 [[package]]
 name = "faasta-macros"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
- "blake3",
  "quote",
  "syn 2.0.96",
 ]

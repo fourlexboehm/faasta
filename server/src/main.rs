@@ -2,7 +2,7 @@ mod build_tooling;
 mod github_auth;
 mod metrics;
 
-use crate::build_tooling::{generate_hmac, handle_upload_and_build};
+use crate::build_tooling::handle_upload_and_build;
 use crate::github_auth::GitHubAuth;
 use std::cmp::max;
 use std::env;
@@ -102,14 +102,13 @@ async fn handle_invoke_rs(
             };
 
             // Generate the symbol name (e.g. "dy_...")
-            let secret = env::var("FAASTA_HMAC_SECRET").unwrap_or_else(|_| "faasta-dev-secret-key".to_string());
-            let hmac = "dy_".to_string() + &*generate_hmac(&*function_name, &secret);
+            // TODO use a longer prefix to prevent collisions
+            let symbol_name = "dy_".to_string() + &*function_name;
             
-            // Note: GitHub auth is only needed for upload, not for invoke
 
             // Safely look up the symbol *once*
             let symbol: Symbol<HandleRequestFn> = unsafe {
-                match new_lib.get(hmac.as_bytes()) {
+                match new_lib.get(symbol_name.as_bytes()) {
                     Ok(s) => s,
                     Err(_) => {
                         return (StatusCode::NOT_FOUND, "Function handler not found").into_response();
@@ -199,10 +198,6 @@ async fn handle_upload_with_auth(
         ).into_response();
     }
     
-    // Generate HMAC for function validation
-    let secret = env::var("FAASTA_HMAC_SECRET").unwrap_or_else(|_| "faasta-dev-secret-key".to_string());
-    let hmac = generate_hmac(&function_name, &secret);
-    
     // Process the upload and get the response
     let build_result = handle_upload_and_build(Path(function_name.clone()), multipart).await;
     
@@ -211,7 +206,7 @@ async fn handle_upload_with_auth(
     
     // Only register the project if the build was successful
     if response.status() == StatusCode::OK {
-        let _ = state.github_auth.add_project(github_username, &function_name, &hmac).await;
+        let _ = state.github_auth.add_project(github_username, &function_name).await;
     }
     
     // Return the build result (convert it to the correct response type)

@@ -8,12 +8,8 @@ use syn::{parse_macro_input, ItemFn};
 /// # Overview
 ///
 /// The `#[faasta]` attribute takes an async function with certain parameters and generates a
-/// new exported function named `dy_<HMAC>`, where `<HMAC>` is derived from:
-///
-/// 1. The crate's package name, obtained from the `CARGO_PKG_NAME` environment variable (or
-///    defaults to `default_package` if not set).
-/// 2. A secret key from the `FAASTA_HMAC_SECRET` environment variable (or defaults to
-///    `default_secret` if not set).
+/// new exported function named `dy_<package_name>`, where `<package_name>` is the crate's package name,
+/// obtained from the `CARGO_PKG_NAME` environment variable (or defaults to `default_package` if not set).
 ///
 /// The generated function has an ABI of `extern "Rust"` and returns a
 /// `Pin<Box<dyn Future<Output = Response<Body>> + Send + 'static>>`. This allows it to be
@@ -74,14 +70,12 @@ use syn::{parse_macro_input, ItemFn};
 /// # Environment Variables
 ///
 /// - `CARGO_PKG_NAME`: Used to determine the crate name. Defaults to `default_package` if not set.
-/// - `FAASTA_HMAC_SECRET`: Used for computing the HMAC-based suffix. Defaults to `default_secret` if not set.
 ///
 /// # Example
 ///
 /// ```rust,ignore
 /// // In Cargo.toml, name might be "my-awesome-service"
 /// // $ export CARGO_PKG_NAME="my-awesome-service"
-/// // $ export FAASTA_HMAC_SECRET="top_secret"
 ///
 /// #[faasta]
 /// async fn my_handler(method: Method, body: Bytes, dir: Dir) -> Response<Body> {
@@ -90,7 +84,7 @@ use syn::{parse_macro_input, ItemFn};
 ///         .body(Body::from("Hello from my-awesome-service!"))
 ///         .unwrap()
 /// }
-/// // This compiles into a function named something like `dy_abcd1234(...)`.
+/// // This compiles into a function named `dy_my-awesome-service(...)`.
 /// ```
 #[proc_macro_attribute]
 pub fn faasta(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -125,13 +119,8 @@ pub fn faasta(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Get the package name from the environment
     let package_name = env::var("CARGO_PKG_NAME").unwrap_or_else(|_| "default_package".to_string());
 
-    // Generate HMAC-based hash for function renaming
-    let secret_key =
-        env::var("FAASTA_HMAC_SECRET").unwrap_or_else(|_| "default_secret".to_string());
-    let hashed_suffix = generate_hmac(&package_name, &secret_key);
-
     // Generate the new function name
-    let new_fn_name = quote::format_ident!("dy_{}", hashed_suffix);
+    let new_fn_name = quote::format_ident!("dy_{}", package_name);
     println!("Generated function name: {}", new_fn_name);
 
     // Generate the wrapper function
@@ -151,19 +140,4 @@ pub fn faasta(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     output.into()
-}
-// Helper function to generate HMAC
-// this  function is duplicated in the server so the macro doesn't require any dependencies
-fn generate_hmac(data: &str, secret: &str) -> String {
-    let mut key = [0u8; 32];
-    let secret_bytes = secret.as_bytes();
-
-    // Copy up to 32 bytes from the secret into the key
-    let len = secret_bytes.len().min(32);
-    key[..len].copy_from_slice(&secret_bytes[..len]);
-
-    blake3::keyed_hash(
-        &key,
-        data.as_bytes(),
-    ).to_string()
 }

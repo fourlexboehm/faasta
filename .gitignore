@@ -4,7 +4,11 @@
 /builds
 .aider*
 target/*
-/target
 .DS_Store
+**/user_data
+**/target
+**/builds
 
 user_data/*
+server/user_data*
+functions/function

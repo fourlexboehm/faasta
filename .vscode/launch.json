@@ -1,0 +1,139 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'faasta_analyze'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=faasta-analyze"
+                ],
+                "filter": {
+                    "name": "faasta_analyze",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'cargo_faasta'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=cargo-faasta"
+                ],
+                "filter": {
+                    "name": "cargo_faasta",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'cargo-faasta'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=cargo-faasta",
+                    "--package=cargo-faasta"
+                ],
+                "filter": {
+                    "name": "cargo-faasta",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'cargo-faasta'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=cargo-faasta",
+                    "--package=cargo-faasta"
+                ],
+                "filter": {
+                    "name": "cargo-faasta",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'test_oauth'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=test_oauth",
+                    "--package=cargo-faasta"
+                ],
+                "filter": {
+                    "name": "test_oauth",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'faasta'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=faasta",
+                    "--package=faasta"
+                ],
+                "filter": {
+                    "name": "faasta",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'faasta'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=faasta",
+                    "--package=faasta"
+                ],
+                "filter": {
+                    "name": "faasta",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

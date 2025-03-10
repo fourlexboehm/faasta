@@ -34,10 +34,8 @@ pub async fn handle_upload_and_build(
     }
     dbg!(&function_name);
 
-    let secret = std::env::var("FAASTA_HMAC_SECRET").unwrap_or_else(|_| "faasta-dev-secret-key".to_string());
     // Create a unique project directory based on the function name
     let project_dir = PathBuf::from(BUILDS_DIRECTORY).join(&function_name);
-    let _hmac = generate_hmac(&function_name, &secret);
 
     // Ensure the project directory exists
     if let Err(e) = fs::create_dir_all(&project_dir).await {
@@ -330,36 +328,3 @@ fn path_is_valid(path: &str) -> bool {
     // Ensure there's exactly 1 component total
     components.count() == 1
 }
-
-pub fn generate_hmac(data: &str, secret: &str) -> String {
-    let mut key = [0u8; 32];
-    let secret_bytes = secret.as_bytes();
-
-    // Copy up to 32 bytes from the secret into the key
-    let len = secret_bytes.len().min(32);
-    key[..len].copy_from_slice(&secret_bytes[..len]);
-
-    blake3::keyed_hash(
-        &key,
-        data.as_bytes(),
-    ).to_string()
-}
-
-
-// pub fn generate_hmac(data: &str, secret: &str) -> String {
-//     return "function".to_string();
-//     type HmacSha256 = Hmac<Sha256>;
-//
-//     let mut mac = HmacSha256::new_from_slice(secret.as_ref())
-//         .expect("HMAC can take key of any size");
-//     mac.update(data.as_ref());
-//
-//     // `result` has type `CtOutput` which is a thin wrapper around array of
-//     // bytes for providing constant time equality check
-//     let result = mac.finalize();
-//     // To get underlying array use `into_bytes`, but be careful, since
-//     // incorrect use of the code value may permit timing attacks which defeats
-//     // the security provided by the `CtOutput`
-//     let code_bytes = result.into_bytes();
-//     hex::encode(code_bytes)
-// }
