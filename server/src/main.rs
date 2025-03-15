@@ -75,14 +75,36 @@ struct AppState {
 }
 
 // Handle function invocation
-async fn handle_invoke_rs(
+async fn handler(
     State(_state): State<AppState>,
-    Path(function_name): Path<String>,
+    Path(path_function_name): Path<String>,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response<Body> {
+    // Extract function name from Host header's subdomain
+    let function_name = match headers.get("Host").and_then(|h| h.to_str().ok()) {
+        Some(host) if !host.starts_with("localhost") && !host.starts_with("127.0.0.1") => {
+            // Extract root subdomain from host (e.g., "function1" from "function1.example.com" or "function1.api.example.com")
+            let host_parts: Vec<&str> = host.split('.').collect();
+            if host_parts.len() >= 2 && !host_parts[0].is_empty() {  // Ensure we have at least one part before a dot
+                host_parts[0].to_string()  // Take the leftmost part as function name
+            } else {
+                // Fall back to path for local testing or invalid subdomain
+                path_function_name
+            }
+        },
+        // For local development (localhost or 127.0.0.1) or missing Host header,
+        // use the path parameter
+        _ => path_function_name,
+    };
+    
+    // If the function name is empty, return a bad request
+    if function_name.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Function name is required").into_response();
+    }
+
     // attempt to fetch from the cache
     let loaded_fn = match LIB_CACHE.get(&function_name) {
         Some(loaded) => loaded,
@@ -286,7 +308,7 @@ async fn main() {
         .route("/upload/{function_name}", post(handle_upload_with_auth))
         .route(
             "/{function_name}",
-            get(handle_invoke_rs).post(handle_invoke_rs),
+            get(handler).post(handler),
         )
         .layer(service)
         .with_state(state);
