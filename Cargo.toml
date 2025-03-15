@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["analyze", "cli", "server", "macros", ]
-exclude = ["function", "server/builds/function", "server/builds/*", "builds/*"]
+exclude = ["function", "**/builds"]
 
 [workspace.dependencies]
 anyhow = "1.0.95"
