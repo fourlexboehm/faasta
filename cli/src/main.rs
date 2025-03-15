@@ -19,8 +19,8 @@ use walkdir::WalkDir;
 use zip::write::{ExtendedFileOptions, FileOptions};
 use zip::{CompressionMethod, ZipWriter};
 
-const UPLOAD_URL: &str = "http://127.0.0.1:8080/upload";
-const INVOKE_URL: &str = "http://127.0.0.1:8080/";
+const UPLOAD_URL: &str = "https://faasta.xyz/upload";
+const INVOKE_URL: &str = "https://faasta.xyz/";
 const MAX_PROJECTS_PER_USER: usize = 10;
 const CONFIG_DIR: &str = ".faasta";
 const CONFIG_FILE: &str = "config.json";
@@ -204,7 +204,7 @@ pub async fn upload_project(github_config: Option<(String, String)>) -> Result<S
     // 5) Return the response body as text, or handle it however needed
     let text = response.text().await?;
     println!("Server response: {text}");
-    println!("Function URL: {}{}", INVOKE_URL, package_name);
+    println!("Function URL: {}", format_function_url(&package_name));
 
     Ok(text)
 }
@@ -263,7 +263,7 @@ async fn main() {
             let (_, package_name) = find_root_package().expect("Failed to find root package");
             spinner.finish_and_clear();
             println!("✅ Function '{}' deployed successfully", package_name);
-            println!("Function URL: {}{}", INVOKE_URL, package_name);
+            println!("Function URL: {}", format_function_url(&package_name));
         }
 
         Commands::Invoke(args) => {
@@ -361,7 +361,7 @@ async fn main() {
                     Ok(_) => {
                         spinner.finish_and_clear();
                         println!("✅ Function '{}' deployed successfully", package_name);
-                        println!("Function URL: {}{}", INVOKE_URL, package_name);
+                        println!("Function URL: {}", format_function_url(&package_name));
                     },
                     Err(e) => {
                         spinner.finish_and_clear();
@@ -550,8 +550,54 @@ pub const CLAP_STYLING: clap::builder::styling::Styles = clap::builder::styling:
     .valid(clap_cargo::style::VALID)
     .invalid(clap_cargo::style::INVALID);
 
+/// Formats the function URL based on the INVOKE_URL
+/// If INVOKE_URL is a domain (not localhost or an IP), it uses function_name as a subdomain
+/// Otherwise, it appends function_name as a path
+fn format_function_url(function_name: &str) -> String {
+    // Parse the INVOKE_URL to get the hostname
+    // Format: scheme://host/path
+    let url_parts: Vec<&str> = INVOKE_URL.split("://").collect();
+    if url_parts.len() != 2 {
+        // If URL doesn't follow the expected format, fall back to the original behavior
+        return format!("{}{}", INVOKE_URL, function_name);
+    }
+    
+    let scheme = url_parts[0];
+    let rest = url_parts[1];
+    
+    // Split host and path
+    let host_path_parts: Vec<&str> = rest.split('/').collect();
+    let host = host_path_parts[0];
+    
+    // Check if host is localhost or an IP address
+    if host == "localhost" || host == "127.0.0.1" || is_ip_address(host) {
+        // For localhost or IP, append function_name as a path
+        let base = if INVOKE_URL.ends_with('/') {
+            INVOKE_URL.to_string()
+        } else {
+            format!("{}/", INVOKE_URL)
+        };
+        format!("{}{}", base, function_name)
+    } else {
+        // For a domain name, use function_name as a subdomain
+        format!("{}://{}.{}/", scheme, function_name, host)
+    }
+}
+
+/// Check if a host string is an IP address
+fn is_ip_address(host: &str) -> bool {
+    host.parse::<std::net::IpAddr>().is_ok()
+}
+
 async fn invoke_function(name: &str, arg: &str) -> Result<(), reqwest::Error> {
-    let resp = reqwest::get(&format!("{}{}/{}", INVOKE_URL, name, arg)).await?;
+    let function_url = format_function_url(name);
+    let invoke_url = if function_url.ends_with('/') {
+        format!("{}{}", function_url, arg)
+    } else {
+        format!("{}/{}", function_url, arg)
+    };
+    
+    let resp = reqwest::get(&invoke_url).await?;
     println!("{:?}", resp.text().await?);
     Ok(())
 }
