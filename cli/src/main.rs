@@ -2,6 +2,7 @@ mod init;
 mod github_oauth;
 #[cfg(test)]
 mod test_build;
+mod run;
 
 use faasta_analyze::lint_project;
 use anyhow::Error;
@@ -441,6 +442,14 @@ async fn main() {
                 }
             }
         }
+        
+        Commands::Run(run_args) => {
+            // Call the run module handler
+            run::handle_run(run_args.port).await.unwrap_or_else(|e| {
+                eprintln!("Failed to run function: {}", e);
+                exit(1);
+            });
+        }
     }
 }
 
@@ -494,6 +503,8 @@ enum Commands {
     Build(BuildArgs),
     /// Set up GitHub authentication
     Login(LoginArgs),
+    /// Run a function locally for testing
+    Run(RunArgs),
 }
 
 #[derive(Args, Debug)]
@@ -511,6 +522,13 @@ struct BuildArgs {
     /// Deploy the function after building
     #[arg(short, long)]
     deploy: bool,
+}
+
+#[derive(Args, Debug)]
+struct RunArgs {
+    /// Port to run the local server on
+    #[arg(short, long, default_value = "3000")]
+    port: u16,
 }
 
 #[derive(Args, Debug)]
