@@ -1,0 +1,38 @@
+[package]
+name = "server-wasi"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.95"
+tokio = { version = "1.42", features = ["full", "net"] }
+hyper = { version = "1.1", features = ["full", "server"] }
+hyper-util = { version = "0.1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4.4", features = ["derive", "env"] }
+sled = "0.34"
+dashmap = "5.5"
+wasmtime = { version = "31.0" }
+wasmtime-wasi = "31.0"
+wasmtime-wasi-http = "31.0"
+rustls-pemfile = "2.2.0"
+tokio-rustls = "0.26.2"
+http-body-util = "0.1"
+bytes = "1.5"
+# Dependencies for network handling
+url = "2.5"
+http = "1.3.1"
+futures-util = "0.3" # Add futures-util
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "2"
+once_cell = "1.18"
+chrono = "0.4"
+faasta-interface = { path = "../interface" }
+tarpc = { version = "0.35", features = ["full"] }
+futures = "0.3"
+s2n-quic = "1.32"
+quinn = "0.11.7"
+rustls = "0.23.25"
+tokio-util = { version = "0.7", features = ["codec"] }

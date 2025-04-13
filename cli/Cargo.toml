@@ -16,7 +16,7 @@ serde_json.workspace = true
 zip.workspace = true
 reqwest = { version = "0.12.12", features = ["blocking", "stream", "multipart", "json"] }
 walkdir = "2.5.0"
-faasta-analyze = { path = "../analyze" }
+# removed dependency on faasta-analyze
 clap = { version = "4", features = ["derive"] }
 clap-cargo = "0.15.1"
 indicatif = "0.17.11"
@@ -29,6 +29,12 @@ axum = "0.8.1"
 libloading = "0.8"
 cap-async-std = "3.4"
 url = "2.5.0"
+# Added for RPC functionality
+faasta-interface = { path = "../interface" }
+futures = "0.3.30"
+s2n-quic = "1.36.0"
+tarpc = { version = "0.35.0", features = ["tokio1", "serde1"] }
+tracing = "0.1.40"
 
 [dev-dependencies]
 tempfile = "3.10.1"

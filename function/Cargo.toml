@@ -14,10 +14,15 @@ lto = "fat"
 codegen-units = 1
 strip = true
 
-
 [dependencies]
 axum = { version = "0.8.1", default-features = false }
 cap-async-std = { version = "3.4.2", features = ["tokio1"] }
 faasta-macros = { version = "0.1.1" }
 sqlx = "0.8.3"
+waki = { path = "../server/waki/waki" }
+
+[[example]]
+name = "http_hello"
+path = "examples/http_hello.rs"
+crate-type = ["cdylib"]
 

@@ -1,0 +1,469 @@
+use anyhow::{anyhow, bail, Context, Result};
+use bytes::Bytes;
+use clap::Parser;
+use http_body_util::{BodyExt, Full};
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::{body::Incoming, header::HOST, Request, Response};
+use faasta_interface::{FunctionServiceImpl, FunctionService};
+mod metrics;
+use metrics::Timer;
+use tarpc::server::{BaseChannel, Channel};
+use tarpc::serde_transport as transport;
+use tarpc::tokio_serde::formats::Bincode;
+use tarpc::tokio_util::codec::LengthDelimitedCodec;
+use futures::prelude::*;
+use rustls_pemfile::{certs, private_key};
+use std::fs::File;
+use std::io::BufReader;
+use std::net::SocketAddr;
+use std::path::{PathBuf, Path};
+use std::sync::Arc;
+use dashmap::DashMap;
+use tokio::net::TcpListener;
+use tokio_rustls::rustls::ServerConfig;
+use tokio_rustls::TlsAcceptor;
+use tracing::{debug, error, info, Level};
+use wasmtime::component::{Component, Linker, ResourceTable};
+use wasmtime::{Config, Engine, Store};
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi_http::bindings::http::types::{ErrorCode, Scheme};
+use wasmtime_wasi_http::bindings::ProxyPre;
+use wasmtime_wasi_http::body::HyperOutgoingBody;
+use wasmtime_wasi_http::io::TokioIo;
+use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
+
+// Create a basic response with string content
+fn text_response(status: u16, text: &str) -> Result<Response<HyperOutgoingBody>> {
+    // Create a simple body with the provided text
+    // Clone the text to ensure it's owned data that will live beyond this function
+    let text_owned = text.to_string();
+    let body = Full::new(Bytes::from(text_owned))
+        .map_err(|_| ErrorCode::InternalError(None))
+        .boxed();
+
+    // Build and return the response
+    Ok(Response::builder()
+        .status(status)
+        .header("Content-Type", "text/plain")
+        .body(HyperOutgoingBody::new(body))?)
+}
+
+// Define the client state that holds ResourceTable, WasiCtx, and WasiHttpCtx
+struct MyClientState {
+    table: ResourceTable,
+    wasi: WasiCtx,
+    http: WasiHttpCtx,
+    function_name: String,
+}
+
+impl wasmtime_wasi::IoView for MyClientState {
+    fn table(&mut self) -> &mut ResourceTable {
+        &mut self.table
+    }
+}
+
+impl WasiView for MyClientState {
+    fn ctx(&mut self) -> &mut WasiCtx {
+        &mut self.wasi
+    }
+}
+
+impl WasiHttpView for MyClientState {
+    fn ctx(&mut self) -> &mut WasiHttpCtx {
+        &mut self.http
+    }
+}
+
+// Server state
+struct MyServer {
+    engine: Engine,
+    metadata_db: sled::Db,
+    pre_cache: DashMap<String, ProxyPre<MyClientState>>,
+    base_domain: String,
+    functions_dir: PathBuf,
+    function_service: Arc<FunctionServiceImpl>,
+}
+
+impl MyServer {
+    fn new(
+        engine: Engine,
+        metadata_db: sled::Db,
+        base_domain: String,
+        functions_dir: PathBuf,
+    ) -> Self {
+        // Create function service with GitHub auth handler
+        let function_service = FunctionServiceImpl::new(
+            functions_dir.clone(),
+            |_username, _token| {
+                // For now, we'll accept all tokens for simplicity
+                // In production, you would validate the token with GitHub
+                Ok(true)
+            }
+        ).expect("Failed to create function service");
+
+        Self {
+            engine,
+            metadata_db,
+            pre_cache: DashMap::new(),
+            base_domain,
+            functions_dir,
+            function_service: Arc::new(function_service),
+        }
+    }
+
+    async fn handle_request(&self, req: Request<Incoming>) -> Result<Response<HyperOutgoingBody>> {
+        // Extract function name from subdomain
+        let host_header = req.headers().get(HOST).and_then(|h| h.to_str().ok());
+
+        if let Some(host) = host_header {
+            let expected_suffix = format!(".{}", self.base_domain);
+
+            if !host.ends_with(&expected_suffix) {
+                return text_response(404, "Not Found");
+            }
+
+            let subdomain = host.trim_end_matches(&expected_suffix);
+            if subdomain.is_empty() || subdomain == host {
+                return text_response(404, "Not Found");
+            }
+
+            info!("Processing request for function: {}", subdomain);
+            
+            // Create a timer for this function call
+            let _timer = Timer::new(subdomain.to_string());
+
+            // Check if function exists
+            let function_path = self.functions_dir.join(format!("{}.wasm", subdomain));
+            if !function_path.exists() {
+                return text_response(404, "Not Found");
+            }
+
+            // Get or load the ProxyPre
+            let pre = self
+                .get_or_load_proxy_pre(subdomain, &function_path)
+                .await?;
+
+            // Create store with client state
+            let mut store = Store::new(
+                pre.engine(),
+                MyClientState {
+                    table: ResourceTable::new(),
+                    wasi: WasiCtxBuilder::new()
+                        .inherit_stdio()
+                        .env("FUNCTION_NAME", subdomain)
+                        .build(),
+                    http: WasiHttpCtx::new(),
+                    function_name: subdomain.to_string(),
+                },
+            );
+
+            // Setup the response channel
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+
+            // Create the WASI HTTP request
+            let wasi_req = store.data_mut().new_incoming_request(Scheme::Http, req)?;
+            let wasi_resp_out = store.data_mut().new_response_outparam(sender)?;
+
+            // Clone the pre so we can move it into the task
+            let pre_clone = pre.clone();
+
+            // Spawn task to execute the function
+            let task = tokio::task::spawn(async move {
+                let proxy = pre_clone.instantiate_async(&mut store).await?;
+                proxy
+                    .wasi_http_incoming_handler()
+                    .call_handle(store, wasi_req, wasi_resp_out)
+                    .await?;
+                Ok::<_, anyhow::Error>(())
+            });
+
+            // Wait for response
+            match receiver.await {
+                Ok(Ok(resp)) => Ok(resp),
+                Ok(Err(err_code)) => {
+                    error!("Function returned error: {:?}", err_code);
+                    Err(anyhow!("Function error: {:?}", err_code))
+                }
+                Err(_) => match task.await {
+                    Ok(Ok(())) => bail!("Function did not set response"),
+                    Ok(Err(e)) => Err(e),
+                    Err(e) => Err(e.into()),
+                },
+            }
+        } else {
+            text_response(400, "Bad Request")
+        }
+    }
+
+    async fn get_or_load_proxy_pre(
+        &self,
+        function_name: &str,
+        function_path: &PathBuf,
+    ) -> Result<ProxyPre<MyClientState>> {
+        // Check if we have this pre-cached
+        if let Some(cached) = self.pre_cache.get(function_name) {
+            return Ok(cached.value().clone());
+        }
+
+        // Load the component and create a linker
+        let component = Component::from_file(&self.engine, function_path)?;
+        let mut linker = Linker::new(&self.engine);
+
+        wasmtime_wasi::add_to_linker_async(&mut linker)?;
+        wasmtime_wasi_http::add_to_linker_async(&mut linker)?;
+
+        // Create the ProxyPre
+        let pre = ProxyPre::new(linker.instantiate_pre(&component)?)?;
+        
+        // Cache it for future use
+        self.pre_cache.insert(function_name.to_string(), pre.clone());
+
+        Ok(pre)
+    }
+}
+
+// We no longer need the convert_wasi_response function as we're using the direct response from wasmtime
+
+#[derive(Parser, Debug, Clone)]
+#[command(name = "server-wasi")]
+#[command(about = "WASI HTTP Function Server", long_about = None)]
+struct Args {
+    /// Address to listen on (e.g., 0.0.0.0:443)
+    #[arg(short, long, env = "LISTEN_ADDR", default_value = "0.0.0.0:443")]
+    listen_addr: SocketAddr,
+
+    /// Base domain for function subdomains (e.g., faasta.xyz)
+    #[arg(long, env = "BASE_DOMAIN", required = true)]
+    base_domain: String,
+
+    /// Path to the TLS certificate file (PEM format) - Wildcard cert recommended
+    #[arg(long, env = "TLS_CERT", required = true)]
+    tls_cert_path: PathBuf,
+
+    /// Path to the TLS private key file (PEM format)
+    #[arg(long, env = "TLS_KEY", required = true)]
+    tls_key_path: PathBuf,
+
+    /// Path to the SledDB database directory
+    #[arg(long, env = "DB_PATH", default_value = "./data/db")]
+    db_path: PathBuf,
+
+    /// Path to the functions directory
+    #[arg(long, env = "FUNCTIONS_PATH", default_value = "./functions")]
+    functions_path: PathBuf,
+}
+
+fn load_tls_config(args: &Args) -> Result<Arc<ServerConfig>> {
+    // Load TLS certificate
+    let cert_file = File::open(&args.tls_cert_path)
+        .with_context(|| format!("Failed to open TLS cert file: {:?}", args.tls_cert_path))?;
+    let mut cert_reader = BufReader::new(cert_file);
+    let certs = certs(&mut cert_reader)
+        .collect::<Result<Vec<_>, _>>()
+        .context("Failed to parse TLS certificates")?;
+
+    // Load TLS private key
+    let key_file = File::open(&args.tls_key_path)
+        .with_context(|| format!("Failed to open TLS key file: {:?}", args.tls_key_path))?;
+    let mut key_reader = BufReader::new(key_file);
+    let key = private_key(&mut key_reader)?.context("No private key found in TLS key file")?;
+
+    // Build TLS config
+    let config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .context("Failed to build TLS server config")?;
+
+    Ok(Arc::new(config))
+}
+
+
+// Function to handle connections for tarpc
+async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<MyServer>) {
+    while let Some(mut connection) = quic_server.accept().await {
+        let server_clone = server.clone();
+        tokio::spawn(async move {
+            debug!("Accepted new connection");
+
+            while let Ok(Some(stream)) = connection.accept_bidirectional_stream().await {
+                let server_clone = server_clone.clone();
+                tokio::spawn(async move {
+                    debug!("Accepted new stream");
+                    let framed = LengthDelimitedCodec::builder().new_framed(stream);
+                    let transport = transport::new(framed, Bincode::default());
+
+                    // Create a cloned service for this connection
+                    let service_clone = FunctionServiceImpl::new(
+                        server_clone.functions_dir.clone(),
+                        |username, token| {
+                            // Use the same auth validation logic
+                            Ok(true) // For simplicity
+                        }
+                    ).expect("Failed to create function service");
+                    
+                    // Process this connection
+                    let server_channel = BaseChannel::with_defaults(transport);
+                    server_channel.execute(service_clone.serve())
+                        .for_each(|fut| {
+                            tokio::spawn(fut);
+                            async {}
+                        })
+                        .await;
+                });
+            }
+        });
+    }
+}
+
+// Removed unused spawn helper function
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Initialize tracing
+    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+
+    // Parse command-line arguments
+    let args = Args::parse();
+    
+    // Create a clone for use in the QUIC server task
+    let args_clone = args.clone();
+
+    info!(
+        "Starting server-wasi with base domain: {}",
+        args.base_domain
+    );
+
+    // Ensure required directories exist
+    std::fs::create_dir_all(&args.db_path)?;
+    std::fs::create_dir_all(&args.functions_path)?;
+    
+    // Ensure metrics database directory exists
+    let metrics_db_path = std::env::var("METRICS_DB_PATH").unwrap_or_else(|_| "./data/metrics".to_string());
+    std::fs::create_dir_all(std::path::Path::new(&metrics_db_path).parent().unwrap_or_else(|| std::path::Path::new(".")))?;
+
+    // Open/create component cache database
+    let pre_cache = sled::open(&args.db_path)?;
+
+    // Configure Wasmtime engine
+    let mut config = Config::new();
+    config.async_support(true);
+    config.wasm_component_model(true);
+
+    // Create the engine
+    let engine = Engine::new(&config)?;
+
+    // Create server
+    let server = Arc::new(MyServer::new(
+        engine,
+        pre_cache,
+        args.base_domain.clone(),
+        args.functions_path.clone(),
+    ));
+    
+    // Load TLS configuration
+    let tls_config = load_tls_config(&args)?;
+    
+
+    
+    let tls_acceptor = TlsAcceptor::from(tls_config.clone());
+
+    // Start listening for connections
+    let listener = TcpListener::bind(&args.listen_addr)
+        .await
+        .with_context(|| format!("Failed to bind to {}", args.listen_addr))?;
+    info!("Listening on https://{}", args.listen_addr);
+
+    // Start tarpc service for function management
+    let server_clone = server.clone();
+    tokio::spawn(async move {
+        let addr = "0.0.0.0:4433".parse::<std::net::SocketAddr>().unwrap();
+        
+        // Configure server with the TLS certs
+        let quic_server = s2n_quic::Server::builder()
+            .with_tls((Path::new(&args_clone.tls_cert_path), Path::new(&args_clone.tls_key_path)))
+            .map_err(|e| anyhow::anyhow!("Failed to set up TLS: {:?}", e))
+            .expect("Failed to set up TLS")
+            .with_io(addr)
+            .map_err(|e| anyhow::anyhow!("Failed to set up IO: {:?}", e))
+            .expect("Failed to set up IO")
+            .start()
+            .map_err(|e| anyhow::anyhow!("Failed to start server: {:?}", e))
+            .expect("Failed to start server");
+
+        info!("RPC service listening on {}", addr);
+        
+        // Process connections
+        run_server(quic_server, server_clone).await;
+    });
+    // Main server loop
+    loop {
+        // Accept incoming connection
+        let (stream, peer_addr) = match listener.accept().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                error!("Failed to accept connection: {}", e);
+                continue;
+            }
+        };
+        info!("Accepted connection from {}", peer_addr);
+
+        // Clone server and acceptor for this connection
+        let server = server.clone();
+        let tls_acceptor = tls_acceptor.clone();
+
+        // Handle connection in a new task
+        tokio::spawn(async move {
+            // Perform TLS handshake
+            match tls_acceptor.accept(stream).await {
+                Ok(tls_stream) => {
+                    info!("TLS handshake successful with {}", peer_addr);
+
+                    // Create a service function for handling HTTP requests
+                    let service = service_fn(move |req: Request<Incoming>| {
+                        let server = server.clone();
+                        async move {
+                            match server.handle_request(req).await {
+                                Ok(response) => Ok::<_, anyhow::Error>(response),
+                                Err(e) => {
+                                    error!("Error handling request: {}", e);
+                                    // Return a generic 500 error response
+                                    match text_response(500, "Internal Server Error") {
+                                        Ok(resp) => Ok(resp),
+                                        Err(err) => {
+                                            error!("Failed to create error response: {}", err);
+                                            // Fall back to a minimal hard-coded response if everything else fails
+                                            let error_text = "Internal Server Error".to_string();
+                                            let body = Full::new(Bytes::from(error_text))
+                                                .map_err(|_| ErrorCode::InternalError(None))
+                                                .boxed();
+                                            Ok(Response::builder()
+                                                .status(500)
+                                                .header("Content-Type", "text/plain")
+                                                .body(HyperOutgoingBody::new(body))
+                                                .unwrap())
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    // Serve the HTTP connection directly with hyper
+                    if let Err(err) = http1::Builder::new()
+                        .serve_connection(TokioIo::new(tls_stream), service)
+                        .await
+                    {
+                        // Only log errors that aren't from client disconnects
+                        if !err.is_closed() && !err.is_canceled() {
+                            error!("Error serving connection from {}: {}", peer_addr, err);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("TLS handshake failed with {}: {}", peer_addr, e);
+                }
+            }
+        });
+    }
+}

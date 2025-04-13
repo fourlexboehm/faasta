@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["analyze", "cli", "server", "macros", ]
+members = ["cli", "interface", "server-wasi"]
 exclude = ["function", "**/builds"]
 
 [workspace.dependencies]

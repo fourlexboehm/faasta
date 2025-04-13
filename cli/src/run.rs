@@ -1,4 +1,5 @@
 use std::io;
+use anyhow::{anyhow, Context, Result};
 use axum::{
     extract::{Path, State},
     routing::get,
@@ -8,13 +9,57 @@ use axum::{
     http::{HeaderMap, Method, StatusCode, Uri},
 };
 use cap_async_std::{fs::Dir, ambient_authority};
+use faasta_interface::FunctionServiceClient;
+// futures prelude removed
+use s2n_quic::Client;
+use s2n_quic::client::Connect;
+use std::path::{Path as StdPath, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tarpc::serde_transport as transport;
+use tarpc::tokio_serde::formats::Bincode;
+use tarpc::tokio_util::codec::LengthDelimitedCodec;
 use tokio::net::TcpListener;
-use faasta_analyze::{lint_project, build_project};
+use tokio::task::JoinHandle;
+use tracing::debug;
 use libloading::{Library, Symbol};
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::process::exit;
 use std::fs;
+
+
+// Create a connection to the function service
+pub async fn connect_to_function_service(server_addr: &str, tls_cert_path: &StdPath) -> Result<FunctionServiceClient> {
+    // Set up the QUIC client
+    let client = Client::builder()
+        .with_tls(tls_cert_path)
+        .context("Failed to set up TLS")?
+        .with_io("0.0.0.0:0")
+        .context("Failed to set up IO")?
+        .start()
+        .context("Failed to start client")?;
+
+    let addr: SocketAddr = server_addr.parse().context("Invalid server address")?;
+    let server_name = addr.ip().to_string();
+    let connect = Connect::new(addr).with_server_name(server_name.as_str());
+    
+    let mut connection = client
+        .connect(connect)
+        .await
+        .map_err(|e| anyhow!("Failed to connect: {}", e))?;
+
+    let stream = connection
+        .open_bidirectional_stream()
+        .await
+        .map_err(|e| anyhow!("Failed to open stream: {}", e))?;
+    debug!("Opened bidirectional stream to function service");
+
+    let framed = LengthDelimitedCodec::builder().new_framed(stream);
+    let transport = transport::new(framed, Bincode::default());
+    let client = FunctionServiceClient::new(Default::default(), transport).spawn();
+
+    Ok(client)
+}
 
 // The function to handle the run command
 pub async fn handle_run(port: u16) -> io::Result<()> {
@@ -36,22 +81,26 @@ pub async fn handle_run(port: u16) -> io::Result<()> {
         exit(1);
     }
 
-    // Run safety lints
-    spinner.set_message("Running security and safety checks...");
-    lint_project(&package_root).await.unwrap_or_else(|e| {
-        spinner.finish_and_clear();
-        eprintln!("Failed security checks: {}", e);
-        eprintln!("Please fix the security issues and try again.");
-        exit(1);
-    });
+    // Run safety lints - removed (analyze crate no longer used)
 
     // Build the project
     spinner.set_message("Building optimized release binary...");
-    build_project(&package_root).await.unwrap_or_else(|e| {
+    // Just use standard cargo build instead
+    let status = std::process::Command::new("cargo")
+        .args(["build", "--release"])
+        .current_dir(&package_root)
+        .status()
+        .unwrap_or_else(|e| {
+            spinner.finish_and_clear();
+            eprintln!("Failed to run cargo build: {}", e);
+            exit(1);
+        });
+        
+    if !status.success() {
         spinner.finish_and_clear();
-        eprintln!("Build failed: {}", e);
+        eprintln!("Build failed");
         exit(1);
-    });
+    }
 
     spinner.finish_and_clear();
     println!("✅ Build successful!");

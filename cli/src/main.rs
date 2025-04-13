@@ -4,20 +4,16 @@ mod github_oauth;
 mod test_build;
 mod run;
 
-use faasta_analyze::lint_project;
 use anyhow::Error;
-use reqwest::{header, multipart, Client};
+use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
-use std::io::{Cursor, Write};
+// Removed unused imports
 use std::path::{Path, PathBuf};
-use faasta_analyze::build_project;
 use std::process::{exit, Command};
-use std::{env, fmt};
-use walkdir::WalkDir;
-use zip::write::{ExtendedFileOptions, FileOptions};
-use zip::{CompressionMethod, ZipWriter};
+use std::fmt;
+// Removed unused imports
 
 const UPLOAD_URL: &str = "https://faasta.xyz/upload";
 const INVOKE_URL: &str = "https://faasta.xyz/";
@@ -112,103 +108,6 @@ fn save_config(config: &FaastaConfig) -> Result<(), Error> {
     Ok(())
 }
 
-/// Recursively walk the given `project_path` and upload all files (including `Cargo.toml`, `src/` content, etc.).
-/// Each file is added to the multipart form with a field name that is the **relative path** from `project_path`.
-/// Zips up the local project (skipping `target/` and build scripts)
-/// and uploads it as a single multipart form field named `"archive"`.
-pub async fn upload_project(github_config: Option<(String, String)>) -> Result<String, Error> {
-    let (package_root, package_name) = find_root_package().unwrap();
-
-    // 1) Create an in-memory buffer that we'll write the zip to.
-    let mut buffer = Vec::new();
-    {
-        let cursor = Cursor::new(&mut buffer);
-        let mut zip = ZipWriter::new(cursor);
-
-        // 2) Walk the project directory and add each file to the zip,
-        //    except for files under `target/` or named `build.rs`.
-        let options: FileOptions<'_, ExtendedFileOptions> = FileOptions::default()
-            .compression_method(CompressionMethod::Deflated)
-            .unix_permissions(0o644);
-
-        for entry in WalkDir::new(&package_root)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            let path = entry.path();
-            // Skip directories; only handle files
-            if !path.is_file() {
-                continue;
-            }
-
-            // Skip `target/` directory
-            if path.strip_prefix(&package_root)
-                .ok()
-                .and_then(|rel| rel.to_str())
-                .map(|s| s.starts_with("target/"))
-                .unwrap_or(false)
-            {
-                continue;
-            }
-
-            if path.file_name().and_then(|n| n.to_str()) == Some("build.rs") {
-                println!("Skipping build.rs, build time code is unsupported");
-                continue;
-            }
-
-            // Derive the relative path from package_root so we can store that
-            // exact path in the zip. For example, `src/main.rs`.
-            let relative_path = match path.strip_prefix(&package_root) {
-                Ok(rp) => rp,
-                Err(_) => continue,
-            };
-
-            // Add a file entry to the zip
-            zip.start_file(
-                relative_path.to_string_lossy(),
-                options.clone()
-            )?;
-
-            // Write the file contents into the zip.
-            let bytes = std::fs::read(path)?;
-            zip.write_all(&bytes)?;
-        }
-
-        // Finalize the ZIP
-        zip.finish()?;
-    } // Drop `zip` so that `buffer` is complete
-
-    // 3) Build a multipart form with a single part containing our in-memory ZIP.
-    let client = Client::new();
-    let zip_part = multipart::Part::bytes(buffer)
-        // The actual filename on the server is up to you;
-        // you can name it e.g. `<crate_name>.zip` or "project.zip"
-        .file_name(format!("{}.zip", package_name));
-
-    let form = multipart::Form::new()
-        .part("archive", zip_part);
-
-    // 4) Send the POST request with our zip file in the form
-    let url = format!("{}/{}", UPLOAD_URL, package_name);
-    let mut request = client.post(&url).multipart(form);
-    
-    // Add GitHub authentication if available
-    if let Some((username, token)) = github_config {
-        request = request
-            .header("X-GitHub-Username", username)
-            .header(header::AUTHORIZATION, token);
-    }
-    
-    let response = request.send().await?;
-
-    // 5) Return the response body as text, or handle it however needed
-    let text = response.text().await?;
-    println!("Server response: {text}");
-    println!("Function URL: {}", format_function_url(&package_name));
-
-    Ok(text)
-}
-
 use clap::{Args, Parser, Subcommand};
 
 /// Main entry point
@@ -222,16 +121,12 @@ async fn main() {
             spinner.set_message("Linting project...");
             spinner.enable_steady_tick(std::time::Duration::from_millis(100));
 
-            lint_project(&env::current_dir().unwrap()).await.unwrap_or_else(|e| {
-                spinner.finish_and_clear();
-                eprintln!("Failed to lint project: {}", e);
-                exit(1);
-            });
+            // Removed lint_project call (analyze crate no longer used)
 
             spinner.set_message("Deploying project...");
             
             // Load GitHub config for authentication
-            let github_config = if args.skip_auth {
+            let _github_config = if args.skip_auth {
                 None
             } else {
                 match load_config() {
@@ -254,16 +149,77 @@ async fn main() {
                 }
             };
             
-            upload_project(github_config).await.unwrap_or_else(|e| {
+            // Implement upload using tarpc client
+            let (package_root, package_name) = find_root_package().expect("Failed to find root package");
+            
+            // Path to the WASM file (this path may need to be adjusted based on build setup)
+            let wasm_path = package_root
+                .join("target")
+                .join("wasm32-wasi")
+                .join("release")
+                .join(format!("{}.wasm", package_name));
+                
+            if !wasm_path.exists() {
                 spinner.finish_and_clear();
-                eprintln!("Failed to deploy project: {}", e);
+                eprintln!("Error: Could not find compiled WASM at: {}", wasm_path.display());
+                eprintln!("Run 'cargo faasta build' first with wasm32-wasi target.");
                 exit(1);
-            });
-
-            let (_, package_name) = find_root_package().expect("Failed to find root package");
-            spinner.finish_and_clear();
-            println!("✅ Function '{}' deployed successfully", package_name);
-            println!("Function URL: {}", format_function_url(&package_name));
+            }
+            
+            // Read the WASM file
+            let wasm_data = match std::fs::read(&wasm_path) {
+                Ok(data) => data,
+                Err(e) => {
+                    spinner.finish_and_clear();
+                    eprintln!("Failed to read WASM file: {}", e);
+                    exit(1);
+                }
+            };
+            
+            // Get GitHub credentials
+            let (github_username, github_token) = if let Some((username, token)) = _github_config {
+                (username, token)
+            } else {
+                spinner.finish_and_clear();
+                eprintln!("GitHub credentials required for function upload.");
+                exit(1);
+            };
+            
+            spinner.set_message(format!("Uploading function '{}' to server...", package_name));
+            
+            // Connect to the function service
+            let cert_path = PathBuf::from("cert.pem"); // You'll need to adjust this path
+            let server_addr = "faasta.xyz:4433";
+            
+            // Use the connect function to get a client
+            let client = match run::connect_to_function_service(server_addr, &cert_path).await {
+                Ok(client) => client,
+                Err(e) => {
+                    spinner.finish_and_clear();
+                    eprintln!("Failed to connect to server: {}", e);
+                    exit(1);
+                }
+            };
+            
+            // Publish the function
+            let auth_token = format!("{}:{}", github_username, github_token);
+            match client.publish(tarpc::context::current(), wasm_data, package_name.clone(), auth_token).await {
+                Ok(Ok(message)) => {
+                    spinner.finish_and_clear();
+                    println!("✅ {}", message);
+                    println!("Function URL: {}", format_function_url(&package_name));
+                },
+                Ok(Err(e)) => {
+                    spinner.finish_and_clear();
+                    eprintln!("Server error: {:?}", e);
+                    exit(1);
+                },
+                Err(e) => {
+                    spinner.finish_and_clear();
+                    eprintln!("Communication error: {}", e);
+                    exit(1);
+                }
+            };
         }
 
         Commands::Invoke(args) => {
@@ -316,29 +272,34 @@ async fn main() {
                 exit(1);
             }
 
-            // Run safety lints
-            spinner.set_message("Running security and safety checks...");
-            lint_project(&package_root).await.unwrap_or_else(|e| {
-                spinner.finish_and_clear();
-                eprintln!("Failed security checks: {}", e);
-                eprintln!("Please fix the security issues and try again.");
-                exit(1);
-            });
+            // Removed safety lints (analyze crate no longer used)
 
             // Build the project
             spinner.set_message("Building optimized release binary...");
-            build_project(&package_root).await.unwrap_or_else(|e| {
+            // Removed build_project call (analyze crate no longer used)
+            // Just use standard cargo build instead
+            let status = Command::new("cargo")
+                .args(["build", "--release"])
+                .current_dir(&package_root)
+                .status()
+                .unwrap_or_else(|e| {
+                    spinner.finish_and_clear();
+                    eprintln!("Failed to run cargo build: {}", e);
+                    exit(1);
+                });
+                
+            if !status.success() {
                 spinner.finish_and_clear();
-                eprintln!("Build failed: {}", e);
+                eprintln!("Build failed");
                 exit(1);
-            });
+            }
 
             // If deploy flag is specified, deploy the function
             if build_args.deploy {
                 spinner.set_message("Deploying function to server...");
                 
                 // Load GitHub config for authentication
-                let github_config = match load_config() {
+                let _github_config = match load_config() {
                     Ok(config) => {
                         match (config.github_username, config.github_token) {
                             (Some(username), Some(token)) => Some((username, token)),
@@ -357,19 +318,77 @@ async fn main() {
                     }
                 };
                 
-                match upload_project(github_config).await {
-                    Ok(_) => {
+                // Implement upload using tarpc client
+                let (package_root, package_name) = find_root_package().expect("Failed to find root package");
+                
+                // Path to the WASM file (this path may need to be adjusted based on build setup)
+                let wasm_path = package_root
+                    .join("target")
+                    .join("wasm32-wasi")
+                    .join("release")
+                    .join(format!("{}.wasm", package_name));
+                    
+                if !wasm_path.exists() {
+                    spinner.finish_and_clear();
+                    eprintln!("Error: Could not find compiled WASM at: {}", wasm_path.display());
+                    eprintln!("Run 'cargo faasta build' first with wasm32-wasi target.");
+                    exit(1);
+                }
+                
+                // Read the WASM file
+                let wasm_data = match std::fs::read(&wasm_path) {
+                    Ok(data) => data,
+                    Err(e) => {
                         spinner.finish_and_clear();
-                        println!("✅ Function '{}' deployed successfully", package_name);
+                        eprintln!("Failed to read WASM file: {}", e);
+                        exit(1);
+                    }
+                };
+                
+                // Get GitHub credentials
+                let (github_username, github_token) = if let Some((username, token)) = _github_config {
+                    (username, token)
+                } else {
+                    spinner.finish_and_clear();
+                    eprintln!("GitHub credentials required for function upload.");
+                    exit(1);
+                };
+                
+                spinner.set_message(format!("Uploading function '{}' to server...", package_name));
+                
+                // Connect to the function service
+                let cert_path = PathBuf::from("cert.pem"); // You'll need to adjust this path
+                let server_addr = "faasta.xyz:4433";
+                
+                // Use the connect function to get a client
+                let client = match run::connect_to_function_service(server_addr, &cert_path).await {
+                    Ok(client) => client,
+                    Err(e) => {
+                        spinner.finish_and_clear();
+                        eprintln!("Failed to connect to server: {}", e);
+                        exit(1);
+                    }
+                };
+                
+                // Publish the function
+                let auth_token = format!("{}:{}", github_username, github_token);
+                match client.publish(tarpc::context::current(), wasm_data, package_name.clone(), auth_token).await {
+                    Ok(Ok(message)) => {
+                        spinner.finish_and_clear();
+                        println!("✅ {}", message);
                         println!("Function URL: {}", format_function_url(&package_name));
+                    },
+                    Ok(Err(e)) => {
+                        spinner.finish_and_clear();
+                        eprintln!("Server error: {:?}", e);
+                        exit(1);
                     },
                     Err(e) => {
                         spinner.finish_and_clear();
-                        eprintln!("Deployment failed: {}", e);
-                        eprintln!("The build succeeded but deployment failed. You can deploy later with 'cargo faasta deploy'");
+                        eprintln!("Communication error: {}", e);
                         exit(1);
                     }
-                }
+                };
             } else {
                 spinner.finish_and_clear();
                 println!("✅ Build successful!");
