@@ -212,7 +212,6 @@ impl MyServer {
     ) -> Result<ProxyPre<MyClientState>> {
         // Check if we have this pre-cached
         if let Some(cached) = self.pre_cache.get(function_name) {
-            info!("Using cached ProxyPre for function: {}", function_name);
             return Ok(cached.value().clone());
         }
 
@@ -222,7 +221,7 @@ impl MyServer {
 
         // wasmtime_wasi::add_to_linker_async(&mut linker)?;
         // let link_options = self.run.compute_wasi_features();
-        let options = LinkOptions::default();
+        let mut options = LinkOptions::default();
         wasmtime_wasi::add_to_linker_with_options_async(&mut linker, &options)?;
         wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
         // wasmtime_wasi::add_to_linker_async(&mut linker)?;
