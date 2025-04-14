@@ -16,10 +16,13 @@ strip = true
 
 [dependencies]
 axum = { version = "0.8.1", default-features = false }
-cap-async-std = { version = "3.4.2", features = ["tokio1"] }
 faasta-macros = { version = "0.1.1" }
+waki = "*"
+
+# Dependencies not compatible with wasm32-wasip2 target
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cap-async-std = { version = "3.4.2", features = ["tokio1"] }
 sqlx = "0.8.3"
-waki = { path = "../server/waki/waki" }
 
 [[example]]
 name = "http_hello"

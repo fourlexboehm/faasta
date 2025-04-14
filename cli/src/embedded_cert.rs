@@ -1,0 +1,47 @@
+//! This module contains the embedded TLS certificate for connecting to the server.
+
+/// The embedded TLS certificate in PEM format.
+pub const EMBEDDED_CERT: &str = r#"-----BEGIN CERTIFICATE-----
+MIIFCTCCAvGgAwIBAgIUOZ4FH+0eSOyzOmUOkebS2IU1ckowDQYJKoZIhvcNAQEL
+BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI1MDQxNDAxNDkzNVoXDTI2MDQx
+NDAxNDkzNVowFDESMBAGA1UEAwwJbG9jYWxob3N0MIICIjANBgkqhkiG9w0BAQEF
+AAOCAg8AMIICCgKCAgEAui5wFq2MgG8iYNNVa0Il41tjr/KNmam14tu9815sgdbt
+KK9Wb/MH0sCaNytnU3zNGd7XObUr1mIklIM4r7+UHKI7PrVtmnjotNzB5sDSZanu
+0rZYYWjgFkCV+k+LyVFronDCg6ZcfiIykceXJKlpg7FS/n3rwRHhTz6V714iI2kN
+nPEv4S5mBjusrZXTXV8XXJKAPJTSrdYJPdJhfHWfXem+irpNJGY1ZFVuTk3OWSTU
+z+C7BQqrzcvbiv/66k4TKbVsz97P8vVUdKdC1D8xow2UL9iBM/SLygltrEsgxuSm
+69vNR6/wF3sBYIcPBfFnzKqz8GnYQh3qpS7P8lJv6rO/bn+I8/+HgcWurkE8cQgI
+0fIQEe4vctzLgXKh8DuvS3icArgzqkgkHLF08XzLeayaIZfPErE+exj1ddDNA4Af
+fYapaIOfzPpm7zxC/W3Wb9vtWTzNopaXU6I5BF/P8GmbjreRYKWMUbiYQpwrlwM7
+R4ywBUA48DHlNp+SMkGPpuYFIOCnGcrFqaM9KZNPoYoWATobObitqlq237nC4e/m
+rQg/U0CcDsc0PAVhEF0AVITlB0EXwTdnNf4cgrdd9LDv298N3I4ACFJs1dG3x08W
+F7qz2pOnG08FpGABG0qLkFRXVkcVYtvNzhg23r0DzMMDrZrX92/V62wb3qPMSP8C
+AwEAAaNTMFEwHQYDVR0OBBYEFHrPYLvwrUQ7NUzaH6fSSB3KHcHWMB8GA1UdIwQY
+MBaAFHrPYLvwrUQ7NUzaH6fSSB3KHcHWMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZI
+hvcNAQELBQADggIBAAJePwPLrfCQoONsNMt10vL7GBMTYUBliR7WNTSU2ihZG8bN
+DJcOTGMRwL320GvR50lb6CrJpN6CmCUJb6U2nmumTIZUmBN1Ce/RJyWHHaLxmwjF
+cTJ5fU1d8T7/ItqIqJ0QY7LbwCzrlITYOA9iyzNUl6IuHR1SDx/Sz1mjY9coTFLL
+koCHWri+uCt+fZLt+zeJDREjvAITFWE9gbbE22li8tHoQfkZPYqhHCfe4jtXPdV2
+a3JqpteGoLeMWaPftVguCtWYw76lk4+3fVB3sVAj58L2m/j/1UsoScPTYehiqr91
+m082GOXWSfCEWsFTY8r4IC5n0HpGpP0CHTmsJFb4TXUMDeuMo3YqI3Xl0E6GmiXk
+MD4P47+1DGxhgfOUdapU8vgqI9x1M1o5KZ4cWNl0knZTgVf7dek7noRSFS4YchXp
+s9EBDvsl8KEh055MiUlQRzrWpqUBWwJmJH4AJrTIGtzfGRXdxPCBrE9CniN4X8sG
+AAEK5CmwTzqDMVh4SjrczfKNXi8k1NBDER0v+0Gmw1vHB6Ks1FjvqzTo1z1OdwlN
+4YrO/zIJelvEjYbLG/+0LboWmsi4zVaSV3BmpzNe84eOGlylRoSjYKpnAabu8wv4
+Z2jbfcSYRjtuqD+pgqanKZlFby1+QiXOySGvhU++z2P10+W/hIGWjI0upNtb
+-----END CERTIFICATE-----"#;
+
+/// Write the embedded certificate to a temporary file and return the path.
+pub fn get_cert_path() -> std::io::Result<std::path::PathBuf> {
+    use std::io::Write;
+    
+    // Create a temporary file
+    let temp_dir = std::env::temp_dir();
+    let cert_path = temp_dir.join("faasta_cert.pem");
+    
+    // Write the certificate to the file
+    let mut file = std::fs::File::create(&cert_path)?;
+    file.write_all(EMBEDDED_CERT.as_bytes())?;
+    
+    Ok(cert_path)
+}

@@ -10,7 +10,7 @@ pub fn handle_new(args: &NewArgs) -> Result<(), Box<dyn Error>> {
     let current_dir = env::current_dir()?;
     let new_project_dir = current_dir.join(&args.package_name);
 
-    if new_project_dir.exists() && args.package_name != "" {
+    if new_project_dir.exists() && !args.package_name.is_empty() {
         return Err(format!("Directory '{}' already exists", args.package_name).into());
     }
     if new_project_dir.join("Cargo.toml").exists() {
@@ -21,7 +21,7 @@ pub fn handle_new(args: &NewArgs) -> Result<(), Box<dyn Error>> {
         .into());
     }
     fs::create_dir_all(new_project_dir.join("src"))?;
-    let pkg_name = if args.package_name == "" {
+    let pkg_name = if args.package_name.is_empty() {
         "axum_serverless"
     } else {
         &*args.package_name

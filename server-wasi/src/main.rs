@@ -5,7 +5,11 @@ use http_body_util::{BodyExt, Full};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{body::Incoming, header::HOST, Request, Response};
-use faasta_interface::{FunctionServiceImpl, FunctionService};
+use faasta_interface::FunctionService;
+mod rpc_service;
+mod github_auth;
+use github_auth::GitHubAuth;
+use rpc_service::FunctionServiceImpl;
 mod metrics;
 use metrics::Timer;
 use tarpc::server::{BaseChannel, Channel};
@@ -83,33 +87,35 @@ struct MyServer {
     base_domain: String,
     functions_dir: PathBuf,
     function_service: Arc<FunctionServiceImpl>,
+    github_auth: Arc<GitHubAuth>,
 }
 
 impl MyServer {
-    fn new(
+    async fn new(
         engine: Engine,
         metadata_db: sled::Db,
         base_domain: String,
         functions_dir: PathBuf,
-    ) -> Self {
+    ) -> Result<Self> {
+        // Initialize GitHub auth
+        let github_auth = Arc::new(GitHubAuth::new(metadata_db.clone()).await?);
+        
         // Create function service with GitHub auth handler
-        let function_service = FunctionServiceImpl::new(
+        let github_auth_clone = github_auth.clone();
+        let function_service = rpc_service::create_service_with_github_auth(
             functions_dir.clone(),
-            |_username, _token| {
-                // For now, we'll accept all tokens for simplicity
-                // In production, you would validate the token with GitHub
-                Ok(true)
-            }
+            github_auth_clone,
         ).expect("Failed to create function service");
 
-        Self {
+        Ok(Self {
             engine,
             metadata_db,
             pre_cache: DashMap::new(),
             base_domain,
             functions_dir,
             function_service: Arc::new(function_service),
-        }
+            github_auth,
+        })
     }
 
     async fn handle_request(&self, req: Request<Incoming>) -> Result<Response<HyperOutgoingBody>> {
@@ -294,12 +300,10 @@ async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<MyServer>) {
                     let transport = transport::new(framed, Bincode::default());
 
                     // Create a cloned service for this connection
-                    let service_clone = FunctionServiceImpl::new(
+                    let github_auth_clone = server_clone.github_auth.clone();
+                    let service_clone = rpc_service::create_service_with_github_auth(
                         server_clone.functions_dir.clone(),
-                        |username, token| {
-                            // Use the same auth validation logic
-                            Ok(true) // For simplicity
-                        }
+                        github_auth_clone,
                     ).expect("Failed to create function service");
                     
                     // Process this connection
@@ -320,6 +324,9 @@ async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<MyServer>) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Install default crypto provider for rustls
+    rustls::crypto::ring::default_provider().install_default().expect("Failed to install crypto provider");
+    
     // Initialize tracing
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
@@ -359,7 +366,7 @@ async fn main() -> Result<()> {
         pre_cache,
         args.base_domain.clone(),
         args.functions_path.clone(),
-    ));
+    ).await?);
     
     // Load TLS configuration
     let tls_config = load_tls_config(&args)?;

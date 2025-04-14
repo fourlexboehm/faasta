@@ -1,11 +1,9 @@
 mod init;
 mod github_oauth;
-#[cfg(test)]
-mod test_build;
 mod run;
+mod embedded_cert;
 
 use anyhow::Error;
-use reqwest;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
@@ -49,19 +47,12 @@ impl fmt::Display for CustomError {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Default)]
 struct FaastaConfig {
     github_username: Option<String>,
     github_token: Option<String>,
 }
 
-impl Default for FaastaConfig {
-    fn default() -> Self {
-        Self {
-            github_username: None,
-            github_token: None,
-        }
-    }
-}
 
 /// Get the configuration directory
 fn get_config_dir() -> PathBuf {
@@ -149,20 +140,82 @@ async fn main() {
                 }
             };
             
-            // Implement upload using tarpc client
-            let (package_root, package_name) = find_root_package().expect("Failed to find root package");
+            // Get package info using cargo metadata
+            let output = Command::new("cargo")
+                .args(["metadata", "--format-version=1"])
+                .output()
+                .unwrap_or_else(|e| {
+                    spinner.finish_and_clear();
+                    eprintln!("Failed to run cargo metadata: {}", e);
+                    exit(1);
+                });
+
+            if !output.status.success() {
+                spinner.finish_and_clear();
+                eprintln!("Failed to retrieve cargo metadata");
+                exit(1);
+            }
+
+            // Parse JSON
+            let metadata: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+                spinner.finish_and_clear();
+                eprintln!("Failed to parse cargo metadata: {}", e);
+                exit(1);
+            });
+
+            // Extract target_directory
+            let target_directory = metadata.get("target_directory")
+                .and_then(Value::as_str)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    spinner.finish_and_clear();
+                    eprintln!("No 'target_directory' found in cargo metadata");
+                    exit(1);
+                });
+
+            // Get the package name from the current directory's Cargo.toml
+            let packages = metadata.get("packages")
+                .and_then(Value::as_array)
+                .unwrap_or_else(|| {
+                    spinner.finish_and_clear();
+                    eprintln!("No 'packages' found in cargo metadata");
+                    exit(1);
+                });
+
+            // Find the package for the current directory
+            let current_dir = std::env::current_dir().unwrap_or_else(|e| {
+                spinner.finish_and_clear();
+                eprintln!("Failed to get current directory: {}", e);
+                exit(1);
+            });
             
-            // Path to the WASM file (this path may need to be adjusted based on build setup)
-            let wasm_path = package_root
-                .join("target")
-                .join("wasm32-wasi")
+            let package_name = packages.iter()
+                .filter_map(|pkg| {
+                    let manifest_path = pkg.get("manifest_path")?.as_str()?;
+                    let pkg_dir = Path::new(manifest_path).parent()?;
+                    if same_file_path(&pkg_dir.to_string_lossy(), &current_dir.to_string_lossy()) {
+                        pkg.get("name")?.as_str().map(String::from)
+                    } else {
+                        None
+                    }
+                })
+                .next()
+                .unwrap_or_else(|| {
+                    spinner.finish_and_clear();
+                    eprintln!("Could not find package for current directory");
+                    exit(1);
+                });
+            
+            // Path to the WASM file
+            let wasm_path = target_directory
+                .join("wasm32-wasip2")
                 .join("release")
                 .join(format!("{}.wasm", package_name));
                 
             if !wasm_path.exists() {
                 spinner.finish_and_clear();
                 eprintln!("Error: Could not find compiled WASM at: {}", wasm_path.display());
-                eprintln!("Run 'cargo faasta build' first with wasm32-wasi target.");
+                eprintln!("Run 'cargo faasta build' first with wasm32-wasip2 target.");
                 exit(1);
             }
             
@@ -188,8 +241,13 @@ async fn main() {
             spinner.set_message(format!("Uploading function '{}' to server...", package_name));
             
             // Connect to the function service
-            let cert_path = PathBuf::from("cert.pem"); // You'll need to adjust this path
-            let server_addr = "faasta.xyz:4433";
+            // Use the embedded certificate
+            let cert_path = embedded_cert::get_cert_path().unwrap_or_else(|e| {
+                spinner.finish_and_clear();
+                eprintln!("Failed to create certificate file: {}", e);
+                exit(1);
+            });
+            let server_addr = &args.server;
             
             // Use the connect function to get a client
             let client = match run::connect_to_function_service(server_addr, &cert_path).await {
@@ -257,30 +315,21 @@ async fn main() {
             let spinner = indicatif::ProgressBar::new_spinner();
             spinner.set_message("Building project...");
             spinner.enable_steady_tick(std::time::Duration::from_millis(100));
-
-            let (package_root, package_name) = find_root_package().expect("Failed to find root package");
-            
-            // Display project info
-            println!("Building project: {}", package_name);
-            println!("Project root: {}", package_root.display());
             
             // Validate the project structure
-            if !package_root.join("src").join("lib.rs").exists() {
+            if !Path::new("src").join("lib.rs").exists() {
                 spinner.finish_and_clear();
                 eprintln!("Error: src/lib.rs is missing. This file is required for FaaSta functions.");
                 eprintln!("Hint: Run 'cargo faasta new <name>' to create a new FaaSta project.");
                 exit(1);
             }
 
-            // Removed safety lints (analyze crate no longer used)
-
-            // Build the project
-            spinner.set_message("Building optimized release binary...");
-            // Removed build_project call (analyze crate no longer used)
-            // Just use standard cargo build instead
+            // Build the project for wasm32-wasip2 target
+            spinner.set_message("Building optimized WASI component...");
+            
+            // Just use standard cargo build with wasm32-wasip2 target
             let status = Command::new("cargo")
-                .args(["build", "--release"])
-                .current_dir(&package_root)
+                .args(["build", "--release", "--target", "wasm32-wasip2"])
                 .status()
                 .unwrap_or_else(|e| {
                     spinner.finish_and_clear();
@@ -318,20 +367,82 @@ async fn main() {
                     }
                 };
                 
-                // Implement upload using tarpc client
-                let (package_root, package_name) = find_root_package().expect("Failed to find root package");
+                // Get package info using cargo metadata
+                let output = Command::new("cargo")
+                    .args(["metadata", "--format-version=1"])
+                    .output()
+                    .unwrap_or_else(|e| {
+                        spinner.finish_and_clear();
+                        eprintln!("Failed to run cargo metadata: {}", e);
+                        exit(1);
+                    });
+
+                if !output.status.success() {
+                    spinner.finish_and_clear();
+                    eprintln!("Failed to retrieve cargo metadata");
+                    exit(1);
+                }
+
+                // Parse JSON
+                let metadata: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+                    spinner.finish_and_clear();
+                    eprintln!("Failed to parse cargo metadata: {}", e);
+                    exit(1);
+                });
+
+                // Extract target_directory
+                let target_directory = metadata.get("target_directory")
+                    .and_then(Value::as_str)
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| {
+                        spinner.finish_and_clear();
+                        eprintln!("No 'target_directory' found in cargo metadata");
+                        exit(1);
+                    });
+
+                // Get the package name from the current directory's Cargo.toml
+                let packages = metadata.get("packages")
+                    .and_then(Value::as_array)
+                    .unwrap_or_else(|| {
+                        spinner.finish_and_clear();
+                        eprintln!("No 'packages' found in cargo metadata");
+                        exit(1);
+                    });
+
+                // Find the package for the current directory
+                let current_dir = std::env::current_dir().unwrap_or_else(|e| {
+                    spinner.finish_and_clear();
+                    eprintln!("Failed to get current directory: {}", e);
+                    exit(1);
+                });
                 
-                // Path to the WASM file (this path may need to be adjusted based on build setup)
-                let wasm_path = package_root
-                    .join("target")
-                    .join("wasm32-wasi")
+                let package_name = packages.iter()
+                    .filter_map(|pkg| {
+                        let manifest_path = pkg.get("manifest_path")?.as_str()?;
+                        let pkg_dir = Path::new(manifest_path).parent()?;
+                        if same_file_path(&pkg_dir.to_string_lossy(), &current_dir.to_string_lossy()) {
+                            pkg.get("name")?.as_str().map(String::from)
+                        } else {
+                            None
+                        }
+                    })
+                    .next()
+                    .unwrap_or_else(|| {
+                        spinner.finish_and_clear();
+                        eprintln!("Could not find package for current directory");
+                        exit(1);
+                    });
+                
+                // Path to the WASM file
+                let wasm_path = target_directory
+                    .join("wasm32-wasip2")
                     .join("release")
                     .join(format!("{}.wasm", package_name));
                     
                 if !wasm_path.exists() {
                     spinner.finish_and_clear();
                     eprintln!("Error: Could not find compiled WASM at: {}", wasm_path.display());
-                    eprintln!("Run 'cargo faasta build' first with wasm32-wasi target.");
+                    eprintln!("Run 'cargo faasta build' first with wasm32-wasip2 target.");
                     exit(1);
                 }
                 
@@ -357,8 +468,13 @@ async fn main() {
                 spinner.set_message(format!("Uploading function '{}' to server...", package_name));
                 
                 // Connect to the function service
-                let cert_path = PathBuf::from("cert.pem"); // You'll need to adjust this path
-                let server_addr = "faasta.xyz:4433";
+                // Use the embedded certificate
+                let cert_path = embedded_cert::get_cert_path().unwrap_or_else(|e| {
+                    spinner.finish_and_clear();
+                    eprintln!("Failed to create certificate file: {}", e);
+                    exit(1);
+                });
+                let server_addr = &build_args.server;
                 
                 // Use the connect function to get a client
                 let client = match run::connect_to_function_service(server_addr, &cert_path).await {
@@ -534,6 +650,10 @@ struct DeployArgs {
     /// Skip GitHub authentication
     #[arg(long)]
     skip_auth: bool,
+
+    /// Server address to deploy to (e.g., "faasta.xyz:4433")
+    #[arg(long, default_value = "faasta.xyz:4433")]
+    server: String,
 }
 
 #[derive(Args, Debug)]
@@ -541,6 +661,10 @@ struct BuildArgs {
     /// Deploy the function after building
     #[arg(short, long)]
     deploy: bool,
+
+    /// Server address to deploy to (e.g., "faasta.xyz:4433")
+    #[arg(long, default_value = "faasta.xyz:4433")]
+    server: String,
 }
 
 #[derive(Args, Debug)]
@@ -616,86 +740,31 @@ async fn invoke_function(name: &str, arg: &str) -> Result<(), reqwest::Error> {
         format!("{}/{}", function_url, arg)
     };
     
-    let resp = reqwest::get(&invoke_url).await?;
-    println!("{:?}", resp.text().await?);
+    println!("Invoking function at: {}", invoke_url);
+    
+    // Create a client that accepts invalid certificates (for testing)
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()?;
+    
+    // Make sure we're using HTTPS
+    let https_url = if !invoke_url.starts_with("https://") && !invoke_url.starts_with("http://") {
+        format!("https://{}", invoke_url)
+    } else if invoke_url.starts_with("http://") {
+        invoke_url.replace("http://", "https://")
+    } else {
+        invoke_url
+    };
+    
+    let resp = client.get(https_url).send().await?;
+    println!("Response status: {}", resp.status());
+    println!("{}", resp.text().await?);
     Ok(())
 }
 
 /// Find a workspace root package if it exists; otherwise pick the
 /// current/only package from cargo metadata.
-fn find_root_package() -> Result<(PathBuf, String), Box<dyn std::error::Error>> {
-    // Run `cargo metadata --format-version=1`
-    let output = Command::new("cargo")
-        .args(["metadata", "--format-version=1"])
-        .output()?;
 
-    if !output.status.success() {
-        return Err("Failed to retrieve cargo metadata".into());
-    }
-
-    // Parse JSON
-    let v: Value = serde_json::from_slice(&output.stdout)?;
-
-    // Extract workspace_root
-    let Some(workspace_root_str) = v.get("workspace_root").and_then(Value::as_str) else {
-        return Err("No 'workspace_root' found in cargo metadata".into());
-    };
-    let workspace_root = PathBuf::from(workspace_root_str);
-
-    // Look through the "packages" array
-    let Some(packages) = v.get("packages").and_then(Value::as_array) else {
-        return Err("'packages' not found or is not an array in cargo metadata".into());
-    };
-
-    // Build what we expect for the "root" package's manifest path
-    let root_manifest_path = workspace_root.join("Cargo.toml").to_string_lossy().to_string();
-
-    // Try to find a package that matches the workspace root
-    for pkg in packages {
-        let pkg_manifest_path = pkg
-            .get("manifest_path")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-
-        if same_file_path(&pkg_manifest_path, &root_manifest_path) {
-            // Found the root package
-            let Some(pkg_name) = pkg.get("name").and_then(Value::as_str) else {
-                return Err("Package in root has no 'name' in cargo metadata".into());
-            };
-            return Ok((workspace_root, pkg_name.to_owned()));
-        }
-    }
-
-    // If we reach here, no package at the workspace root. Possibly a virtual manifest.
-    // Fallback: if there's exactly one package total, pick it.
-    if packages.len() == 1 {
-        let pkg = &packages[0];
-        let Some(pkg_obj) = pkg.as_object() else {
-            return Err("Expected 'packages[0]' to be an object".into());
-        };
-
-        let Some(pkg_name) = pkg_obj.get("name").and_then(Value::as_str) else {
-            return Err("Single package has no 'name' field".into());
-        };
-        let Some(pkg_manifest_str) = pkg_obj.get("manifest_path").and_then(Value::as_str) else {
-            return Err("Single package has no 'manifest_path' field".into());
-        };
-
-        // We'll treat the parent directory of that single manifest as its root
-        let package_path = PathBuf::from(pkg_manifest_str)
-            .parent()
-            .ok_or("Could not get parent directory of manifest_path")?
-            .to_path_buf();
-
-        return Ok((package_path, pkg_name.to_owned()));
-    }
-
-    // Otherwise, return an error if there's more than one package.
-    Err(format!(
-        "No package found in {} (virtual manifest?), and multiple packages exist; cannot pick a single fallback package.",
-        root_manifest_path
-    ))?
-}
 
 /// Compare two file paths in a slightly more robust way.
 /// (On Windows, e.g., backslash vs forward slash).

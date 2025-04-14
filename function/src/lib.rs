@@ -1,39 +1,47 @@
-use axum::body::{Body, Bytes};
-use axum::http::{HeaderMap, Method, StatusCode, Uri};
-use axum::response::Response;
-use cap_async_std::fs::Dir;
-use faasta_macros::faasta;
-use std::future::Future;
-use std::pin::Pin;
+use waki::{handler, ErrorCode, Request, Response};
 
-/// This is the main handler function for your FaaSta serverless application.
-/// 
-/// The #[faasta] macro is required and makes this function the entry point.
-/// The function signature must match exactly as shown below.
-///
-/// Parameters:
-/// - method: HTTP method of the request (GET, POST, etc.)
-/// - uri: URI of the request 
-/// - headers: HTTP headers from the request
-/// - body: Request body as bytes
-/// - dir: A capability-based directory handle for file operations
-#[faasta]
-async fn handler(method: Method, uri: Uri, headers: HeaderMap, body: Bytes, dir: Dir) -> Response<Body> {
-    // You can access different parts of the request:
-    let path = uri.path();
-    let method_str = method.as_str();
-
-    // Example of using the path to determine response
-    if path.ends_with("/hello") {
-        return Response::builder()
-            .status(StatusCode::OK)
-            .body(Body::from("Hello, World!"))
-            .unwrap();
-    }
+#[handler]
+fn hello(req: Request) -> Result<Response, ErrorCode> {
+    // Extract query parameters
+    let query = req.query();
+    let default_name = "World".to_string();
+    let name = query.get("name").unwrap_or(&default_name);
     
-    // Default response
+    // Extract path from the URL
+    // Try to get path directly if available, otherwise use a default
+    let path = "/";
+    
+    // Get headers
+    let headers = req.headers();
+    let user_agent = headers.get("user-agent")
+        .map(|h| h.to_str().unwrap_or("Unknown"))
+        .unwrap_or("Unknown");
+    
+    // Build response with HTML
     Response::builder()
-        .status(StatusCode::OK)
-        .body(Body::from(format!("FaaSta function received {} request to {}", method_str, path)))
-        .unwrap()
+        .header("content-type", "text/html")
+        .body(format!(
+            r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>WASI HTTP Example</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }}
+        h1 {{ color: #333; }}
+        .info {{ background-color: #f5f5f5; padding: 15px; border-radius: 5px; }}
+        .highlight {{ color: #0066cc; font-weight: bold; }}
+    </style>
+</head>
+<body>
+    <h1>Hello, {}!</h1>
+    <div class="info">
+        <p>You accessed path: <span class="highlight">{}</span></p>
+        <p>Your User-Agent: <span class="highlight">{}</span></p>
+        <p>This function is running on WASI Preview 2 HTTP with subdomain routing!</p>
+    </div>
+</body>
+</html>"#,
+            name, path, user_agent
+        ))
+        .build()
 }
