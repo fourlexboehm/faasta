@@ -184,7 +184,9 @@ impl FunctionService for FunctionServiceImpl {
         }
         
         // Save the WASM file
-        let wasm_path = self.functions_dir.join(format!("{}.wasm", name));
+        // Convert hyphens to underscores in function name for the WASM file
+        let wasm_filename = format!("{}.wasm", name.replace('-', "_"));
+        let wasm_path = self.functions_dir.join(wasm_filename);
         let mut file = fs::File::create(&wasm_path).map_err(|e| 
             FunctionError::InternalError(format!("Failed to create file: {}", e)))?;
         file.write_all(&wasm_file).map_err(|e| 
@@ -260,7 +262,9 @@ impl FunctionService for FunctionServiceImpl {
             self.functions_db.remove(&name);
             
             // Remove WASM file
-            let wasm_path = self.functions_dir.join(format!("{}.wasm", name));
+            // Convert hyphens to underscores in function name for the WASM file
+            let wasm_filename = format!("{}.wasm", name.replace('-', "_"));
+            let wasm_path = self.functions_dir.join(wasm_filename);
             if wasm_path.exists() {
                 fs::remove_file(wasm_path).map_err(|e| 
                     FunctionError::InternalError(format!("Failed to remove file: {}", e)))?;

@@ -2,12 +2,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
-use tracing::{debug, info};
-use faasta_interface::{FunctionMetricsResponse, Metrics};
-use sled;
+use tracing::{debug, info, error};
+use faasta_interface::{FunctionMetricsResponse, Metrics, FunctionError, FunctionResult};
+use std::str;
 
 // Global metrics storage using DashMap for concurrent access
-pub static FUNCTION_METRICS: Lazy<DashMap<String, FunctionMetric>> = Lazy::new(|| DashMap::new());
+pub static FUNCTION_METRICS: Lazy<DashMap<String, FunctionMetric>> = Lazy::new(DashMap::new);
 
 // Sled database for persistent storage
 pub static METRICS_DB: Lazy<sled::Db> = Lazy::new(|| {
@@ -96,32 +96,47 @@ impl FunctionMetric {
         )
     }
 }
-
 pub fn get_metrics() -> Metrics {
     let mut function_metrics = Vec::new();
     let mut total_time = 0;
     let mut total_calls = 0;
     
-    for entry in FUNCTION_METRICS.iter() {
-        let (name, time, calls, last_called) = entry.get_data();
-        
-        // Convert timestamp to ISO string
-        let last_called_time = UNIX_EPOCH + Duration::from_millis(last_called);
-        let last_called_str = chrono::DateTime::<chrono::Utc>::from(last_called_time)
-            .to_rfc3339();
-        
-        function_metrics.push(FunctionMetricsResponse {
-            function_name: name,
-            total_time_millis: time,
-            call_count: calls,
-            last_called: last_called_str,
-        });
-        
-        total_time += time;
-        total_calls += calls;
+    // Iterate through all entries in the sled database
+    for result in METRICS_DB.iter() {
+        if let Ok((key, value)) = result {
+            // Skip user project count entries (they start with "user:")
+            if key.starts_with(b"user:") {
+                continue;
+            }
+            
+            let function_name = match str::from_utf8(&key) {
+                Ok(name) => name.to_string(),
+                Err(_) => continue, // Skip invalid UTF-8 keys
+            };
+            
+            // Decode the metrics data
+            if let Ok(((total_time_ms, call_count, last_called), _)) =
+                bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(&value, bincode::config::standard()) {
+                
+                // Convert timestamp to ISO string
+                let last_called_time = UNIX_EPOCH + Duration::from_millis(last_called);
+                let last_called_str = chrono::DateTime::<chrono::Utc>::from(last_called_time)
+                    .to_rfc3339();
+                
+                function_metrics.push(FunctionMetricsResponse {
+                    function_name: function_name.clone(),
+                    total_time_millis: total_time_ms,
+                    call_count,
+                    last_called: last_called_str,
+                });
+                
+                total_time += total_time_ms;
+                total_calls += call_count;
+            }
+        }
     }
     
-    info!("Returning metrics: {} functions, {} total calls, {} total ms", 
+    info!("Returning metrics from sled: {} functions, {} total calls, {} total ms",
           function_metrics.len(), total_calls, total_time);
     
     Metrics {
@@ -167,4 +182,74 @@ impl Drop for Timer {
         let metric = get_or_create_metric(&self.function_name);
         metric.record_call(duration.as_millis() as u64);
     }
+}
+
+// User project management functions
+
+/// Get the number of projects for a user
+pub fn get_user_project_count(username: &str) -> u32 {
+    let key = format!("user:{}", username);
+    
+    if let Ok(Some(data)) = METRICS_DB.get(key.as_bytes()) {
+        // First convert bytes to string, then parse the string as u32
+        if let Ok(s) = str::from_utf8(&data) {
+            if let Ok(count) = s.parse::<u32>() {
+                return count;
+            }
+        }
+    }
+    
+    // Default to 0 if not found or error
+    0
+}
+
+/// Increment the project count for a user
+pub fn increment_user_project_count(username: &str) -> FunctionResult<u32> {
+    let key = format!("user:{}", username);
+    let new_count = get_user_project_count(username) + 1;
+    
+    // Check if user has reached the project limit
+    if new_count > 10 {
+        return Err(FunctionError::PermissionDenied(
+            "User has reached the maximum limit of 10 projects".to_string()
+        ));
+    }
+    
+    // Store the new count
+    match METRICS_DB.insert(key.as_bytes(), new_count.to_string().as_bytes()) {
+        Ok(_) => {
+            debug!("Incremented project count for user '{}' to {}", username, new_count);
+            Ok(new_count)
+        },
+        Err(e) => {
+            error!("Failed to increment project count for user '{}': {}", username, e);
+            Err(FunctionError::InternalError(format!("Failed to update project count: {}", e)))
+        }
+    }
+}
+
+/// Decrement the project count for a user
+pub fn decrement_user_project_count(username: &str) -> FunctionResult<u32> {
+    let key = format!("user:{}", username);
+    let current_count = get_user_project_count(username);
+    
+    // Don't go below zero
+    let new_count = if current_count > 0 { current_count - 1 } else { 0 };
+    
+    // Store the new count
+    match METRICS_DB.insert(key.as_bytes(), new_count.to_string().as_bytes()) {
+        Ok(_) => {
+            debug!("Decremented project count for user '{}' to {}", username, new_count);
+            Ok(new_count)
+        },
+        Err(e) => {
+            error!("Failed to decrement project count for user '{}': {}", username, e);
+            Err(FunctionError::InternalError(format!("Failed to update project count: {}", e)))
+        }
+    }
+}
+
+/// Check if a user can create more projects
+pub fn can_create_project(username: &str) -> bool {
+    get_user_project_count(username) < 10
 }

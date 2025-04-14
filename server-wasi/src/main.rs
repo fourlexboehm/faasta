@@ -18,6 +18,7 @@ use tarpc::tokio_serde::formats::Bincode;
 use tarpc::tokio_util::codec::LengthDelimitedCodec;
 use futures::prelude::*;
 use rustls_pemfile::{certs, private_key};
+use wasmtime_wasi::bindings::LinkOptions;
 use std::fs::File;
 use std::io::BufReader;
 use std::net::SocketAddr;
@@ -140,7 +141,9 @@ impl MyServer {
             let _timer = Timer::new(subdomain.to_string());
 
             // Check if function exists
-            let function_path = self.functions_dir.join(format!("{}.wasm", subdomain));
+            // Convert hyphens to underscores in function name for the WASM file
+            let wasm_filename = format!("{}.wasm", subdomain.replace('-', "_"));
+            let function_path = self.functions_dir.join(wasm_filename);
             if !function_path.exists() {
                 return text_response(404, "Not Found");
             }
@@ -216,8 +219,13 @@ impl MyServer {
         let component = Component::from_file(&self.engine, function_path)?;
         let mut linker = Linker::new(&self.engine);
 
-        wasmtime_wasi::add_to_linker_async(&mut linker)?;
-        wasmtime_wasi_http::add_to_linker_async(&mut linker)?;
+        // wasmtime_wasi::add_to_linker_async(&mut linker)?;
+        // let link_options = self.run.compute_wasi_features();
+        let mut options = LinkOptions::default();
+        wasmtime_wasi::add_to_linker_with_options_async(&mut linker, &options)?;
+        wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
+        // wasmtime_wasi::add_to_linker_async(&mut linker)?;
+        // wasmtime_wasi::bindings::cli::environment::add_to_linker_get_host(&mut linker, |_| {})?;
 
         // Create the ProxyPre
         let pre = ProxyPre::new(linker.instantiate_pre(&component)?)?;
