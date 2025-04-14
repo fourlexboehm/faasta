@@ -207,10 +207,12 @@ async fn main() {
                 });
             
             // Path to the WASM file
+            // Convert hyphens to underscores in package name for the WASM file
+            let wasm_filename = format!("{}.wasm", package_name.replace('-', "_"));
             let wasm_path = target_directory
                 .join("wasm32-wasip2")
                 .join("release")
-                .join(format!("{}.wasm", package_name));
+                .join(wasm_filename);
                 
             if !wasm_path.exists() {
                 spinner.finish_and_clear();
@@ -434,10 +436,12 @@ async fn main() {
                     });
                 
                 // Path to the WASM file
+                // Convert hyphens to underscores in package name for the WASM file
+                let wasm_filename = format!("{}.wasm", package_name.replace('-', "_"));
                 let wasm_path = target_directory
                     .join("wasm32-wasip2")
                     .join("release")
-                    .join(format!("{}.wasm", package_name));
+                    .join(wasm_filename);
                     
                 if !wasm_path.exists() {
                     spinner.finish_and_clear();

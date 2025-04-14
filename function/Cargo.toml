@@ -1,31 +1,19 @@
 [package]
-name = "function"
+name = "http-rust"
 version = "0.1.0"
 edition = "2021"
 
-[workspace]
-
 [lib]
-crate-type=["cdylib"]
-
-[profile.release]
-opt-level = "z"
-lto = "fat"
-codegen-units = 1
-strip = true
-
-[dependencies]
-axum = { version = "0.8.1", default-features = false }
-faasta-macros = { version = "0.1.1" }
-waki = "*"
-
-# Dependencies not compatible with wasm32-wasip2 target
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-cap-async-std = { version = "3.4.2", features = ["tokio1"] }
-sqlx = "0.8.3"
-
-[[example]]
-name = "http_hello"
-path = "examples/http_hello.rs"
 crate-type = ["cdylib"]
 
+[dependencies]
+anyhow = "1"
+http = "1"
+spin-sdk = "3"
+
+# reduce wasm binary size
+[profile.release]
+lto = true
+strip = "symbols"
+
+[workspace]

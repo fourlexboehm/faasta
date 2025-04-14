@@ -1,30 +1,39 @@
-use waki::{handler, ErrorCode, Request, Response};
+use spin_sdk::http::{IntoResponse, Response};
+use spin_sdk::http_component;
 
-#[handler]
-fn hello(req: Request) -> Result<Response, ErrorCode> {
+/// A simple Spin HTTP component.
+#[http_component]
+fn hello_world(req: http::Request<()>) -> anyhow::Result<impl IntoResponse> {
     // Extract query parameters
-    let query = req.query();
-    let default_name = "World".to_string();
-    let name = query.get("name").unwrap_or(&default_name);
+    let query = req.uri().query().unwrap_or("");
+    let name = query
+        .split('&')
+        .find_map(|pair| {
+            let mut parts = pair.split('=');
+            if parts.next() == Some("name") {
+                parts.next()
+            } else {
+                None
+            }
+        })
+        .unwrap_or("World");
     
     // Extract path from the URL
-    // Try to get path directly if available, otherwise use a default
-    let path = "/";
+    let path = req.uri().path();
     
-    // Get headers
-    let headers = req.headers();
-    let user_agent = headers.get("user-agent")
+    // Get user agent
+    let user_agent = req
+        .headers()
+        .get(http::header::USER_AGENT)
         .map(|h| h.to_str().unwrap_or("Unknown"))
         .unwrap_or("Unknown");
     
     // Build response with HTML
-    Response::builder()
-        .header("content-type", "text/html")
-        .body(format!(
-            r#"<!DOCTYPE html>
+    let html = format!(
+        r#"<!DOCTYPE html>
 <html>
 <head>
-    <title>WASI HTTP Example</title>
+    <title>Faasta HTTP Example</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }}
         h1 {{ color: #333; }}
@@ -37,11 +46,16 @@ fn hello(req: Request) -> Result<Response, ErrorCode> {
     <div class="info">
         <p>You accessed path: <span class="highlight">{}</span></p>
         <p>Your User-Agent: <span class="highlight">{}</span></p>
-        <p>This function is running on WASI Preview 2 HTTP with subdomain routing!</p>
+        <p>This function is running on Faasta with subdomain routing!</p>
     </div>
 </body>
 </html>"#,
-            name, path, user_agent
-        ))
-        .build()
+        name, path, user_agent
+    );
+
+    Ok(Response::builder()
+        .status(200)
+        .header("content-type", "text/html")
+        .body(html)
+        .build())
 }

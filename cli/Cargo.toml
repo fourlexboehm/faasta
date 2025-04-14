@@ -33,7 +33,7 @@ url = "2.5.0"
 faasta-interface = { path = "../interface" }
 futures = "0.3.30"
 s2n-quic = "1.36.0"
-tarpc = { version = "0.35.0", features = ["tokio1", "serde1"] }
+tarpc = { version = "0.36.0", features = ["tokio1", "serde1"] }
 tracing = "0.1.40"
 
 [dev-dependencies]

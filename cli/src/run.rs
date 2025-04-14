@@ -1,14 +1,5 @@
 use std::io;
 use anyhow::{anyhow, Context, Result};
-use axum::{
-    extract::{Path, State},
-    routing::get,
-    Router, 
-    response::IntoResponse,
-    body::Bytes,
-    http::{HeaderMap, Method, StatusCode, Uri},
-};
-use cap_async_std::{fs::Dir, ambient_authority};
 use faasta_interface::FunctionServiceClient;
 // futures prelude removed
 use s2n_quic::Client;
@@ -17,13 +8,10 @@ use std::path::{Path as StdPath, PathBuf};
 use tarpc::serde_transport as transport;
 use tarpc::tokio_serde::formats::Bincode;
 use tarpc::tokio_util::codec::LengthDelimitedCodec;
-use tokio::net::TcpListener;
 use tracing::debug;
-use libloading::{Library, Symbol};
 use std::net::SocketAddr;
 use std::process::exit;
 use std::fs;
-use serde_json;
 
 /// Compare two file paths in a slightly more robust way.
 /// (On Windows, e.g., backslash vs forward slash).
@@ -205,17 +193,19 @@ let package_root = current_dir;
     // Convert to component using wasm-tools
     spinner.set_message("Converting to WASI component...");
     
-    let wasm_path = package_root
-        .join("target")
+    // Convert hyphens to underscores in package name for the WASM file
+    let wasm_filename = format!("{}.wasm", package_name.replace('-', "_"));
+    let wasm_path = target_directory
         .join("wasm32-wasip2")
         .join("release")
-        .join(format!("{}.wasm", package_name));
+        .join(wasm_filename);
         
-    let component_path = package_root
-        .join("target")
+    // Convert hyphens to underscores in package name for the component file
+    let component_filename = format!("{}_component.wasm", package_name.replace('-', "_"));
+    let component_path = target_directory
         .join("wasm32-wasip2")
         .join("release")
-        .join(format!("{}_component.wasm", package_name));
+        .join(component_filename);
     
     let status = std::process::Command::new("wasm-tools")
         .args(["component", "new", wasm_path.to_str().unwrap(), "-o", component_path.to_str().unwrap()])
@@ -242,11 +232,12 @@ let package_root = current_dir;
     println!("Press Ctrl+C to stop the server");
     
     // Path to the compiled WASI component
-    let component_path = package_root
-        .join("target")
+    // Convert hyphens to underscores in package name for the component file
+    let component_filename = format!("{}_component.wasm", package_name.replace('-', "_"));
+    let component_path = target_directory
         .join("wasm32-wasip2")
         .join("release")
-        .join(format!("{}_component.wasm", package_name));
+        .join(component_filename);
     
     if !component_path.exists() {
         eprintln!("Error: Could not find compiled WASI component at: {}", component_path.display());
@@ -261,6 +252,7 @@ let package_root = current_dir;
         fs::create_dir_all(&server_functions_dir).expect("Failed to create server functions directory");
     }
     
+    // Use the original package name for the server function path (server handles the conversion)
     let server_function_path = server_functions_dir.join(format!("{}.wasm", package_name));
     fs::copy(&component_path, &server_function_path)
         .unwrap_or_else(|e| {

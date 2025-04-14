@@ -1,5 +1,2 @@
 [build]
-target = "wasm32-wasip2"
-
-[target.wasm32-wasip2]
-runner = "wasmtime run --dir=. --"
+target = "wasm32-wasi"
