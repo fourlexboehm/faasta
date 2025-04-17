@@ -9,6 +9,11 @@
       <sourceFolder url="file://$MODULE_DIR$/macros/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/server/builds/function/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/server/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/cli/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/interface/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/server-wasi/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/server-wasi/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/function/examples" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/FFI/target" />
       <excludeFolder url="file://$MODULE_DIR$/analyze/target" />
       <excludeFolder url="file://$MODULE_DIR$/cli/target" />

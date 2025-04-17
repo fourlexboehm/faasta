@@ -26,8 +26,9 @@ fn same_file_path(a: &str, b: &str) -> bool {
 pub async fn connect_to_function_service(server_addr: &str, tls_cert_path: &StdPath) -> Result<FunctionServiceClient> {
     // Set up the QUIC client
     let client = Client::builder()
-        .with_tls(tls_cert_path)
-        .context("Failed to set up TLS")?
+    // .with_tls(tls)
+        // .with_tls(tls_cert_path)
+        // .context("Failed to set up TLS")?
         .with_io("0.0.0.0:0")
         .context("Failed to set up IO")?
         .start()

@@ -7,6 +7,7 @@ use hyper::service::service_fn;
 use hyper::{body::Incoming, header::HOST, Request, Response};
 use faasta_interface::FunctionService;
 mod rpc_service;
+mod cert_manager;
 mod github_auth;
 use github_auth::GitHubAuth;
 use rpc_service::FunctionServiceImpl;
@@ -14,8 +15,10 @@ mod metrics;
 use metrics::Timer;
 use tarpc::server::{BaseChannel, Channel};
 use tarpc::serde_transport as transport;
+use cert_manager::CertManager;
 use tarpc::tokio_serde::formats::Bincode;
 use tarpc::tokio_util::codec::LengthDelimitedCodec;
+use lers::{solver::dns::CloudflareDns01Solver, Directory, LETS_ENCRYPT_STAGING_URL};
 use futures::prelude::*;
 use rustls_pemfile::{certs, private_key};
 use wasmtime_wasi::bindings::LinkOptions;
@@ -28,15 +31,18 @@ use dashmap::DashMap;
 use tokio::net::TcpListener;
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
-use tracing::{debug, error, info, Level};
 use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi_http::bindings::http::types::{ErrorCode, Scheme};
 use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::body::HyperOutgoingBody;
+use tracing::{debug, error, info, warn, Level};
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
+
+// Define Let's Encrypt production URL
+const LETS_ENCRYPT_PRODUCTION_URL: &str = "https://acme-v02.api.letsencrypt.org/directory";
 
 // Create a basic response with string content
 fn text_response(status: u16, text: &str) -> Result<Response<HyperOutgoingBody>> {
@@ -251,13 +257,29 @@ struct Args {
     #[arg(long, env = "BASE_DOMAIN", required = true)]
     base_domain: String,
 
-    /// Path to the TLS certificate file (PEM format) - Wildcard cert recommended
-    #[arg(long, env = "TLS_CERT", required = true)]
+    /// Path to the TLS certificate file (PEM format)
+    #[arg(long, env = "TLS_CERT", default_value = "./certs/cert.pem")]
     tls_cert_path: PathBuf,
 
-    /// Path to the TLS private key file (PEM format)
-    #[arg(long, env = "TLS_KEY", required = true)]
+    /// Path to the TLS private key file (PEM format) 
+    #[arg(long, env = "TLS_KEY", default_value = "./certs/key.pem")]
     tls_key_path: PathBuf,
+
+    /// Path to the certs directory
+    #[arg(long, env = "CERTS_DIR", default_value = "./certs")]
+    certs_dir: PathBuf,
+
+    /// Email address for Let's Encrypt
+    #[arg(long, env = "LETSENCRYPT_EMAIL", default_value = "admin@faasta.xyz")]
+    letsencrypt_email: String,
+
+    /// Use Let's Encrypt staging environment (for testing)
+    #[arg(long, env = "LETSENCRYPT_STAGING", default_value = "false")]
+    letsencrypt_staging: bool,
+
+    /// Auto-generate TLS certificate using Let's Encrypt
+    #[arg(long, env = "AUTO_CERT", default_value = "true")]
+    auto_cert: bool,
 
     /// Path to the SledDB database directory
     #[arg(long, env = "DB_PATH", default_value = "./data/db")]
@@ -292,6 +314,54 @@ fn load_tls_config(args: &Args) -> Result<Arc<ServerConfig>> {
     Ok(Arc::new(config))
 }
 
+// Generate or renew certificate using Let's Encrypt and Cloudflare DNS challenge
+async fn obtain_certificate(
+    domain: &str,
+    email: &str,
+    use_staging: bool,
+    cert_path: &Path,
+    key_path: &Path,
+) -> Result<()> {
+    info!("Obtaining certificate for domain: {}", domain);
+    
+    // Create a Cloudflare DNS-01 solver from environment variables (CLOUDFLARE_API_TOKEN)
+    let solver = CloudflareDns01Solver::from_env()?.build()?;
+    
+    // Determine URL based on staging flag
+    let directory_url = if use_staging {
+        LETS_ENCRYPT_STAGING_URL
+    } else {
+        LETS_ENCRYPT_PRODUCTION_URL
+    };
+    
+    // Create directory with Cloudflare DNS solver
+    let directory = Directory::builder(directory_url)
+        .dns01_solver(Box::new(solver))
+        .build()
+        .await?;
+    
+    // Create an ACME account
+    let account = directory
+        .account()
+        .terms_of_service_agreed(true)
+        .contacts(vec![format!("mailto:{}", email)])
+        .create_if_not_exists()
+        .await?;
+    
+    // Request certificate for wildcard domain
+    let certificate = account
+        .certificate()
+        .add_domain(format!("*.{}", domain))
+        .add_domain(domain.to_string()) // Also add base domain
+        .obtain()
+        .await?;
+    
+    // Write certificate and key to files
+    tokio::fs::write(cert_path, certificate.to_pem().unwrap()).await?;
+    tokio::fs::write(key_path, certificate.private_key_to_pem().unwrap()).await?;
+    
+    Ok(())
+}
 
 // Function to handle connections for tarpc
 async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<MyServer>) {
@@ -334,24 +404,42 @@ async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<MyServer>) {
 async fn main() -> Result<()> {
     // Install default crypto provider for rustls
     rustls::crypto::ring::default_provider().install_default().expect("Failed to install crypto provider");
+
+    // Load environment variables from .env file if present
+    let _ = dotenvy::dotenv();
     
     // Initialize tracing
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
     // Parse command-line arguments
     let args = Args::parse();
-    
-    // Create a clone for use in the QUIC server task
-    let args_clone = args.clone();
-
-    info!(
-        "Starting server-wasi with base domain: {}",
-        args.base_domain
-    );
 
     // Ensure required directories exist
     std::fs::create_dir_all(&args.db_path)?;
     std::fs::create_dir_all(&args.functions_path)?;
+    std::fs::create_dir_all(&args.certs_dir)?;
+    
+    // Setup certificate management
+    if args.auto_cert {
+        // Create CertManager instance
+        let cert_manager = CertManager::new(
+            args.base_domain.clone(),
+            args.certs_dir.clone(),
+            args.tls_cert_path.clone(),
+            args.tls_key_path.clone(),
+            args.letsencrypt_email.clone(),
+            args.letsencrypt_staging,
+        );
+        
+        // Obtain or renew certificate if needed
+        cert_manager.obtain_or_renew_certificate().await
+            .context("Failed to obtain/renew TLS certificate")?;
+    }
+
+    // Create a clone for use in the QUIC server task
+    let args_clone = args.clone();
+    
+    info!("Starting server-wasi with base domain: {}", args.base_domain);
     
     // Ensure metrics database directory exists
     let metrics_db_path = std::env::var("METRICS_DB_PATH").unwrap_or_else(|_| "./data/metrics".to_string());
@@ -361,6 +449,7 @@ async fn main() -> Result<()> {
     let pre_cache = sled::open(&args.db_path)?;
 
     // Configure Wasmtime engine
+
     let mut config = Config::new();
     config.async_support(true);
     config.wasm_component_model(true);
