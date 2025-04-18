@@ -18,7 +18,7 @@ use tarpc::serde_transport as transport;
 use cert_manager::CertManager;
 use tarpc::tokio_serde::formats::Bincode;
 use tarpc::tokio_util::codec::LengthDelimitedCodec;
-use lers::{solver::dns::CloudflareDns01Solver, Directory, LETS_ENCRYPT_STAGING_URL};
+// Removed unused imports from lers
 use futures::prelude::*;
 use rustls_pemfile::{certs, private_key};
 use wasmtime_wasi::bindings::LinkOptions;
@@ -37,12 +37,9 @@ use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi_http::bindings::http::types::{ErrorCode, Scheme};
 use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::body::HyperOutgoingBody;
-use tracing::{debug, error, info, warn, Level};
+use tracing::{debug, error, info, Level};
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
-
-// Define Let's Encrypt production URL
-const LETS_ENCRYPT_PRODUCTION_URL: &str = "https://acme-v02.api.letsencrypt.org/directory";
 
 // Create a basic response with string content
 fn text_response(status: u16, text: &str) -> Result<Response<HyperOutgoingBody>> {
@@ -65,6 +62,7 @@ struct MyClientState {
     table: ResourceTable,
     wasi: WasiCtx,
     http: WasiHttpCtx,
+    #[allow(dead_code)] // Kept for future telemetry/debugging
     function_name: String,
 }
 
@@ -93,6 +91,7 @@ struct MyServer {
     pre_cache: DashMap<String, ProxyPre<MyClientState>>,
     base_domain: String,
     functions_dir: PathBuf,
+    // function_service is kept for extensibility
     function_service: Arc<FunctionServiceImpl>,
     github_auth: Arc<GitHubAuth>,
 }
@@ -112,6 +111,7 @@ impl MyServer {
         let function_service = rpc_service::create_service_with_github_auth(
             functions_dir.clone(),
             github_auth_clone,
+            metadata_db.clone(),
         ).expect("Failed to create function service");
 
         Ok(Self {
@@ -314,54 +314,7 @@ fn load_tls_config(args: &Args) -> Result<Arc<ServerConfig>> {
     Ok(Arc::new(config))
 }
 
-// Generate or renew certificate using Let's Encrypt and Cloudflare DNS challenge
-async fn obtain_certificate(
-    domain: &str,
-    email: &str,
-    use_staging: bool,
-    cert_path: &Path,
-    key_path: &Path,
-) -> Result<()> {
-    info!("Obtaining certificate for domain: {}", domain);
-    
-    // Create a Cloudflare DNS-01 solver from environment variables (CLOUDFLARE_API_TOKEN)
-    let solver = CloudflareDns01Solver::from_env()?.build()?;
-    
-    // Determine URL based on staging flag
-    let directory_url = if use_staging {
-        LETS_ENCRYPT_STAGING_URL
-    } else {
-        LETS_ENCRYPT_PRODUCTION_URL
-    };
-    
-    // Create directory with Cloudflare DNS solver
-    let directory = Directory::builder(directory_url)
-        .dns01_solver(Box::new(solver))
-        .build()
-        .await?;
-    
-    // Create an ACME account
-    let account = directory
-        .account()
-        .terms_of_service_agreed(true)
-        .contacts(vec![format!("mailto:{}", email)])
-        .create_if_not_exists()
-        .await?;
-    
-    // Request certificate for wildcard domain
-    let certificate = account
-        .certificate()
-        .add_domain(format!("*.{}", domain))
-        .add_domain(domain.to_string()) // Also add base domain
-        .obtain()
-        .await?;
-    
-    // Write certificate and key to files
-    tokio::fs::write(cert_path, certificate.to_pem().unwrap()).await?;
-    tokio::fs::write(key_path, certificate.private_key_to_pem().unwrap()).await?;
-    
-    Ok(())
-}
+// The obtain_certificate function was removed as it's now handled by the CertManager
 
 // Function to handle connections for tarpc
 async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<MyServer>) {
@@ -382,6 +335,7 @@ async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<MyServer>) {
                     let service_clone = rpc_service::create_service_with_github_auth(
                         server_clone.functions_dir.clone(),
                         github_auth_clone,
+                        server_clone.metadata_db.clone(),
                     ).expect("Failed to create function service");
                     
                     // Process this connection
@@ -464,6 +418,8 @@ async fn main() -> Result<()> {
         args.base_domain.clone(),
         args.functions_path.clone(),
     ).await?);
+    // Spawn a background task to flush metrics to DB every hour
+    metrics::spawn_periodic_flush(60 * 60);
     
     // Load TLS configuration
     let tls_config = load_tls_config(&args)?;

@@ -3,8 +3,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use tracing::{debug, info, error};
+use tokio::time::{interval, Duration as TokioDuration};
+use bincode;
 use faasta_interface::{FunctionMetricsResponse, Metrics, FunctionError, FunctionResult};
 use std::str;
+
 
 // Global metrics storage using DashMap for concurrent access
 pub static FUNCTION_METRICS: Lazy<DashMap<String, FunctionMetric>> = Lazy::new(DashMap::new);
@@ -73,18 +76,7 @@ impl FunctionMetric {
             self.total_time.load(Ordering::Relaxed)
         );
         
-        // Persist to sled
-        let data = bincode::encode_to_vec(
-            (
-                self.total_time.load(Ordering::Relaxed),
-                self.call_count.load(Ordering::Relaxed),
-                now,
-            ),
-            bincode::config::standard()
-        ).expect("Failed to serialize metrics");
-        
-        METRICS_DB.insert(self.function_name.as_bytes(), data)
-            .expect("Failed to store metrics in database");
+        // No immediate persistence; metrics will be flushed periodically
     }
     
     pub fn get_data(&self) -> (String, u64, u64, u64) {
@@ -100,7 +92,7 @@ pub fn get_metrics() -> Metrics {
     let mut function_metrics = Vec::new();
     let mut total_time = 0;
     let mut total_calls = 0;
-    
+
     // Iterate through all entries in the sled database
     for result in METRICS_DB.iter() {
         if let Ok((key, value)) = result {
@@ -108,37 +100,61 @@ pub fn get_metrics() -> Metrics {
             if key.starts_with(b"user:") {
                 continue;
             }
-            
+
             let function_name = match str::from_utf8(&key) {
                 Ok(name) => name.to_string(),
                 Err(_) => continue, // Skip invalid UTF-8 keys
             };
-            
-            // Decode the metrics data
-            if let Ok(((total_time_ms, call_count, last_called), _)) =
-                bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(&value, bincode::config::standard()) {
-                
+
+            // Decode the DB metrics data
+            if let Ok(((db_total_time, db_call_count, db_last_called), _)) =
+                bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(
+                    &value,
+                    bincode::config::standard(),
+                )
+            {
+                // Load in-memory metrics
+                let (mem_total_time, mem_call_count, mem_last_called) = FUNCTION_METRICS
+                    .get(&function_name)
+                    .map(|m| {
+                        (
+                            m.total_time.load(Ordering::Relaxed),
+                            m.call_count.load(Ordering::Relaxed),
+                            m.last_called.load(Ordering::Relaxed),
+                        )
+                    })
+                    .unwrap_or((0, 0, 0));
+
+                // Combine DB and in-memory metrics
+                let combined_total_time = db_total_time.saturating_add(mem_total_time);
+                let combined_call_count = db_call_count.saturating_add(mem_call_count);
+                let combined_last_called = std::cmp::max(db_last_called, mem_last_called);
+
                 // Convert timestamp to ISO string
-                let last_called_time = UNIX_EPOCH + Duration::from_millis(last_called);
+                let last_called_time = UNIX_EPOCH + Duration::from_millis(combined_last_called);
                 let last_called_str = chrono::DateTime::<chrono::Utc>::from(last_called_time)
                     .to_rfc3339();
-                
+
                 function_metrics.push(FunctionMetricsResponse {
                     function_name: function_name.clone(),
-                    total_time_millis: total_time_ms,
-                    call_count,
+                    total_time_millis: combined_total_time,
+                    call_count: combined_call_count,
                     last_called: last_called_str,
                 });
-                
-                total_time += total_time_ms;
-                total_calls += call_count;
+
+                total_time += combined_total_time;
+                total_calls += combined_call_count;
             }
         }
     }
-    
-    info!("Returning metrics from sled: {} functions, {} total calls, {} total ms",
-          function_metrics.len(), total_calls, total_time);
-    
+
+    info!(
+        "Returning metrics: {} functions, {} total calls, {} total ms",
+        function_metrics.len(),
+        total_calls,
+        total_time
+    );
+
     Metrics {
         total_time,
         total_calls,
@@ -252,4 +268,69 @@ pub fn decrement_user_project_count(username: &str) -> FunctionResult<u32> {
 /// Check if a user can create more projects
 pub fn can_create_project(username: &str) -> bool {
     get_user_project_count(username) < 10
+}
+/// Flush in-memory metrics to persistent DB and reset counters.
+pub fn flush_metrics_to_db() {
+    for entry in FUNCTION_METRICS.iter() {
+        let function_name = entry.key();
+        let metric = entry.value();
+        let mem_total = metric.total_time.load(Ordering::Relaxed);
+        let mem_calls = metric.call_count.load(Ordering::Relaxed);
+        let mem_last = metric.last_called.load(Ordering::Relaxed);
+
+        if mem_calls == 0 {
+            continue; // Skip if no calls were made
+        }
+
+        // Load existing DB values
+        let existing = METRICS_DB.get(function_name.as_bytes()).unwrap_or(None);
+        let (db_total, db_calls, db_last) = if let Some(db_bytes) = existing {
+            if let Ok(((t, c, l), _)) = bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(
+                &db_bytes,
+                bincode::config::standard(),
+            ) {
+                (t, c, l)
+            } else {
+                (0, 0, 0)
+            }
+        } else {
+            (0, 0, 0)
+        };
+
+        let new_total = db_total.saturating_add(mem_total);
+        let new_calls = db_calls.saturating_add(mem_calls);
+        let new_last = std::cmp::max(db_last, mem_last);
+
+        // Serialize and insert
+        match bincode::encode_to_vec((new_total, new_calls, new_last), bincode::config::standard()) {
+            Ok(data) => {
+                if let Err(e) = METRICS_DB.insert(function_name.as_bytes(), data) {
+                    error!("Failed to persist flushed metrics for {}: {}", function_name, e);
+                }
+            }
+            Err(e) => {
+                error!("Failed to encode flushed metrics for {}: {}", function_name, e);
+            }
+        }
+
+        // Reset in-memory counters
+        metric.total_time.store(0, Ordering::Relaxed);
+        metric.call_count.store(0, Ordering::Relaxed);
+        metric.last_called.store(0, Ordering::Relaxed);
+    }
+    // Ensure DB writes are durable
+    if let Err(e) = METRICS_DB.flush() {
+        error!("Failed to flush metrics DB: {}", e);
+    }
+}
+
+/// Spawn a Tokio task to periodically flush metrics to DB every `interval_secs` seconds.
+pub fn spawn_periodic_flush(interval_secs: u64) {
+    tokio::spawn(async move {
+        let mut ticker = interval(TokioDuration::from_secs(interval_secs));
+        loop {
+            ticker.tick().await;
+            flush_metrics_to_db();
+        }
+    });
 }

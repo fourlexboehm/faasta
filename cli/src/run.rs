@@ -23,7 +23,7 @@ fn same_file_path(a: &str, b: &str) -> bool {
 }
 
 // Create a connection to the function service
-pub async fn connect_to_function_service(server_addr: &str, tls_cert_path: &StdPath) -> Result<FunctionServiceClient> {
+pub async fn connect_to_function_service(server_addr: &str, _tls_cert_path: &StdPath) -> Result<FunctionServiceClient> {
     // Set up the QUIC client
     let client = Client::builder()
     // .with_tls(tls)

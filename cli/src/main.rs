@@ -13,7 +13,6 @@ use std::process::{exit, Command};
 use std::fmt;
 // Removed unused imports
 
-const UPLOAD_URL: &str = "https://faasta.xyz/upload";
 const INVOKE_URL: &str = "https://faasta.xyz/";
 const MAX_PROJECTS_PER_USER: usize = 10;
 const CONFIG_DIR: &str = ".faasta";

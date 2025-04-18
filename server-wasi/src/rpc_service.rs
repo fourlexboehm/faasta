@@ -7,6 +7,11 @@ use std::fs;
 use std::io::Write;
 use dashmap::DashMap;
 use tracing::{debug, error};
+use sled;
+use bincode;
+
+/// Sled tree name for function metadata
+const FUNCTIONS_DB_TREE: &str = "functions";
 
 /// Implementation of the FunctionService
 #[derive(Clone)]
@@ -14,28 +19,48 @@ pub struct FunctionServiceImpl {
     functions_dir: PathBuf,
     functions_db: Arc<DashMap<String, FunctionInfo>>,
     github_auth: Arc<GitHubAuth>,
+    functions_tree: sled::Tree,
 }
 
 impl FunctionServiceImpl {
     /// Create a new FunctionServiceImpl
+    /// Create a new FunctionServiceImpl, loading persisted metadata from sled
     pub fn new(
         functions_dir: PathBuf,
         github_auth: Arc<GitHubAuth>,
+        metadata_db: sled::Db,
     ) -> anyhow::Result<Self> {
-        // Create functions directory if it doesn't exist
+        // Ensure functions directory exists
         if !functions_dir.exists() {
             fs::create_dir_all(&functions_dir)?;
         }
-        
-        // Load existing functions from the directory
+
+        // In-memory function info
         let functions_db = Arc::new(DashMap::new());
-        
-        // TODO: Load existing functions from metadata files
-        
+
+        // Open or create sled tree for function metadata
+        let functions_tree = metadata_db.open_tree(FUNCTIONS_DB_TREE)?;
+
+        // Load existing function metadata from sled
+        for item in functions_tree.iter() {
+            let (key_bytes, val) = item?;
+            let name = String::from_utf8(key_bytes.to_vec())?;
+            // Decode using bincode
+            match bincode::decode_from_slice::<FunctionInfo, _>(&val, bincode::config::standard()) {
+                Ok((info, _)) => {
+                    functions_db.insert(name, info);
+                }
+                Err(e) => {
+                    error!("Failed to decode function metadata for {}: {}", name, e);
+                }
+            }
+        }
+
         Ok(Self {
             functions_dir,
             functions_db,
             github_auth,
+            functions_tree,
         })
     }
     
@@ -153,40 +178,34 @@ impl FunctionService for FunctionServiceImpl {
             ));
         }
         
-        // Check if function already exists
-        if self.functions_db.contains_key(&name) {
-            let existing = self.functions_db.get(&name).unwrap();
-            if existing.owner != username {
+        // Determine WASM file path (convert hyphens to underscores)
+        let wasm_filename = format!("{}.wasm", name.replace('-', "_"));
+        let wasm_path = self.functions_dir.join(&wasm_filename);
+
+        // Check if function already exists (in memory or on disk)
+        if self.functions_db.contains_key(&name) || wasm_path.exists() {
+            // Ensure the user owns this function
+            if !self.github_auth.verify_function_ownership(&username, &name) {
                 return Err(FunctionError::PermissionDenied(
                     "A function with this name already exists and belongs to another user".to_string()
                 ));
             }
-            // If the function exists and belongs to the user, we're just updating it
-            // No need to check project limits or increment the count
+            // Existing function owned by user: proceed with update
         } else {
-            // Check if user can create more projects
+            // New function: enforce project limit and register ownership
             if !self.github_auth.can_upload_project(&username, &name) {
                 return Err(FunctionError::PermissionDenied(
                     "You have reached the maximum limit of 10 projects".to_string()
                 ));
             }
-            
-            // Add the project to the user's list
             match self.github_auth.add_project(&username, &name).await {
-                Ok(_) => {
-                    debug!("Added project '{}' for user '{}'", name, username);
-                },
+                Ok(_) => debug!("Added project '{}' for user '{}'", name, username),
                 Err(e) => {
                     error!("Failed to add project: {}", e);
                     return Err(FunctionError::InternalError(format!("Failed to add project: {}", e)));
                 }
             }
         }
-        
-        // Save the WASM file
-        // Convert hyphens to underscores in function name for the WASM file
-        let wasm_filename = format!("{}.wasm", name.replace('-', "_"));
-        let wasm_path = self.functions_dir.join(wasm_filename);
         let mut file = fs::File::create(&wasm_path).map_err(|e| 
             FunctionError::InternalError(format!("Failed to create file: {}", e)))?;
         file.write_all(&wasm_file).map_err(|e| 
@@ -198,13 +217,17 @@ impl FunctionService for FunctionServiceImpl {
             name: name.clone(),
             owner: username,
             published_at: now,
-            usage: format!("https://faasta.xyz/{}", name),
+            usage: format!("https://{}.faasta.xyz", name),
         };
         
-        // Save function metadata
+        // Save in-memory and persist metadata to sled
         self.functions_db.insert(name.clone(), function_info.clone());
-        
-        // TODO: Save metadata to a file or database
+        // Serialize metadata with bincode
+        let meta = bincode::encode_to_vec(&function_info, bincode::config::standard())
+            .map_err(|e| FunctionError::InternalError(format!("Failed to serialize function metadata: {}", e)))?;
+        // Persist metadata to sled
+        self.functions_tree.insert(name.as_bytes(), meta)
+            .map_err(|e| FunctionError::InternalError(format!("Failed to persist function metadata: {}", e)))?;
         
         Ok(format!("Function '{}' published successfully", name))
     }
@@ -282,7 +305,10 @@ impl FunctionService for FunctionServiceImpl {
                 }
             }
             
-            // TODO: Remove metadata file
+            // Remove metadata from sled
+            if let Err(e) = self.functions_tree.remove(name.as_bytes()) {
+                error!("Failed to remove function metadata for '{}': {}", name, e);
+            }
             
             Ok(())
         } else {
@@ -315,6 +341,7 @@ impl FunctionService for FunctionServiceImpl {
 pub fn create_service_with_github_auth(
     functions_dir: PathBuf,
     github_auth: Arc<GitHubAuth>,
+    metadata_db: sled::Db,
 ) -> anyhow::Result<FunctionServiceImpl> {
-    FunctionServiceImpl::new(functions_dir, github_auth)
+    FunctionServiceImpl::new(functions_dir, github_auth, metadata_db)
 }
