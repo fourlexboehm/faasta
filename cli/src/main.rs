@@ -796,9 +796,8 @@ async fn invoke_function(name: &str, arg: &str) -> Result<(), reqwest::Error> {
     Ok(())
 }
 
-/// Find a workspace root package if it exists; otherwise pick the
-/// current/only package from cargo metadata.
-
+/// Find a workspace root package if it exists; otherwise pick the current/only package from cargo metadata.
+///
 /// Compare two file paths in a slightly more robust way.
 /// (On Windows, e.g., backslash vs forward slash).
 fn same_file_path(a: &str, b: &str) -> bool {

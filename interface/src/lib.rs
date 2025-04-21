@@ -90,13 +90,16 @@ pub trait FunctionService {
     async fn get_metrics(github_auth_token: String) -> FunctionResult<Metrics>;
 }
 
+/// Type alias for the auth validator function type
+pub type AuthValidatorFn = Box<dyn Fn(&str, &str) -> anyhow::Result<bool> + Send + Sync>;
+
 /// Implementation of the FunctionService
 #[derive(Clone)]
 pub struct FunctionServiceImpl {
     functions_dir: PathBuf,
     functions_db: Arc<DashMap<String, FunctionInfo>>,
     metrics_db: Arc<DashMap<String, (u64, u64, u64)>>, // (total_time, call_count, last_called)
-    auth_validator: Arc<Mutex<Box<dyn Fn(&str, &str) -> anyhow::Result<bool> + Send + Sync>>>,
+    auth_validator: Arc<Mutex<AuthValidatorFn>>,
 }
 
 impl FunctionServiceImpl {

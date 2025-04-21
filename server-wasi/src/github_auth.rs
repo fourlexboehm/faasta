@@ -30,10 +30,9 @@ impl GitHubAuth {
         for item in user_tree.iter().flatten() {
             if let Ok(username) = std::str::from_utf8(&item.0) {
                 // Try to decode using bincode
-                if let Ok((user_data, _)) = bincode::decode_from_slice::<UserData, _>(
-                    &item.1,
-                    bincode::config::standard(),
-                ) {
+                if let Ok((user_data, _)) =
+                    bincode::decode_from_slice::<UserData, _>(&item.1, bincode::config::standard())
+                {
                     user_projects.insert(username.to_string(), user_data);
                 } else {
                     // Fallback to serde_json for backward compatibility
