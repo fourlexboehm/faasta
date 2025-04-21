@@ -36,8 +36,7 @@ futures = "0.3"
 s2n-quic = "1.32"
 quinn = "0.11.7"
 rustls = "0.23.25"
-tokio-util = { version = "0.7", features = ["codec"] }
-lers = { version = "0.4", features = ["dns-01", "dns-01-cloudflare"] }
+tokio-util = { version = "0.7", features = ["codec", "compat"] }
 dotenvy = "0.15"
 x509-parser = "0.15.0"
 openssl = "0.10.59"  # Required by lers
