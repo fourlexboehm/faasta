@@ -98,7 +98,7 @@ impl CertManager {
         let cert_data = fs::read(&self.cert_path)
             .with_context(|| format!("Failed to read certificate file: {:?}", self.cert_path))?;
 
-        let mut reader = std::io::Cursor::new(cert_data);
+        let mut reader = std::io::Cursor::new(&cert_data);
         let certs = rustls_pemfile::certs(&mut reader)
             .collect::<Result<Vec<_>, _>>()
             .context("Failed to parse certificate")?;
@@ -125,34 +125,63 @@ impl CertManager {
     // Retrieve SSL certificate from Porkbun API
     async fn get_ssl(&self) -> Result<PorkbunResponse> {
         // Get API keys from environment variables
-        let apikey = env::var("PORKBUN_API_KEY")
-            .context("PORKBUN_API_KEY environment variable not set")?;
-        let secretapikey = env::var("PORKBUN_SECRET_API_KEY")
-            .context("PORKBUN_SECRET_API_KEY environment variable not set")?;
+        let apikey = match env::var("PORKBUN_API_KEY") {
+            Ok(key) => key,
+            Err(_) => return Err(anyhow::anyhow!("PORKBUN_API_KEY environment variable not set. Please set it to your Porkbun API key.")),
+        };
+        
+        let secretapikey = match env::var("PORKBUN_SECRET_API_KEY") {
+            Ok(key) => key,
+            Err(_) => return Err(anyhow::anyhow!("PORKBUN_SECRET_API_KEY environment variable not set. Please set it to your Porkbun Secret API key.")),
+        };
             
-        let url = format!("https://porkbun.com/api/json/v3/ssl/retrieve/{}", self.domain);
+        let url = format!("https://api.porkbun.com/api/json/v3/ssl/retrieve/{}", self.domain);
+        
+        // Log some debug info (mask the actual API keys for security)
+        let apikey_masked = format!("{}...{}", 
+            apikey.chars().take(4).collect::<String>(), 
+            &apikey[apikey.len().saturating_sub(4)..]);
+            
+        let secretkey_masked = format!("{}...{}", 
+            secretapikey.chars().take(4).collect::<String>(), 
+            &secretapikey[secretapikey.len().saturating_sub(4)..]);
+            
+        info!("Using Porkbun API keys: {} and {}", apikey_masked, secretkey_masked);
         
         let request_body = PorkbunRequest {
-            apikey,
-            secretapikey,
+            apikey: apikey.clone(),
+            secretapikey: secretapikey.clone(),
         };
-
+        
+        info!("Sending request to Porkbun API for domain: {}", self.domain);
+        
         let response = self.client
             .post(&url)
             .json(&request_body)
             .send()
-            .await?
-            .json::<PorkbunResponse>()
-            .await?;
+            .await
+            .context("Failed to send request to Porkbun API")?;
+            
+        // Get the raw response text first for debugging
+        let response_text = response
+            .text()
+            .await
+            .context("Failed to read response body from Porkbun API")?;
+        
+        info!("Received response from Porkbun API: {}", &response_text);
+            
+        // Parse the response
+        let response_json: PorkbunResponse = serde_json::from_str(&response_text)
+            .context(format!("Failed to parse Porkbun API response: {}", response_text))?;
 
-        if response.status == "ERROR" {
+        if response_json.status == "ERROR" {
             return Err(anyhow::anyhow!(
-                "Error retrieving SSL: {}",
-                response.message.unwrap_or_else(|| "Unknown error".to_string())
+                "Error retrieving SSL from Porkbun: {}",
+                response_json.message.unwrap_or_else(|| "Unknown error".to_string())
             ));
         }
 
-        Ok(response)
+        Ok(response_json)
     }
 
     // Obtain or renew the certificate
@@ -187,7 +216,7 @@ impl CertManager {
                 .await?;
             cert_file.write_all(cert_chain.as_bytes()).await?;
         } else {
-            return Err(anyhow::anyhow!("Certificate chain missing in API response"));
+            return Err(anyhow::anyhow!("Certificate chain missing in Porkbun API response"));
         }
 
         // Save private key
@@ -202,7 +231,7 @@ impl CertManager {
                 .await?;
             key_file.write_all(private_key.as_bytes()).await?;
         } else {
-            return Err(anyhow::anyhow!("Private key missing in API response"));
+            return Err(anyhow::anyhow!("Private key missing in Porkbun API response"));
         }
 
         info!("Successfully downloaded certificates for domain: {}", self.domain);
