@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["FunctionError","FunctionServiceRequest","FunctionServiceResponse"],"fn":["create_service_with_github_auth"],"struct":["FunctionInfo","FunctionMetricsResponse","FunctionServiceClient","FunctionServiceImpl","Metrics","ServeFunctionService"],"trait":["FunctionService","FunctionServiceStub"],"type":["FunctionResult"]};

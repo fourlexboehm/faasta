@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_CLIENT_ID","DEFAULT_CLIENT_SECRET","REDIRECT_PORT"],"fn":["get_client_id","get_client_secret","get_github_username","get_oauth_client","get_test_data","github_oauth_flow","start_redirect_server","wait_for_callback"],"static":["TEST_MODE","TEST_TOKEN","TEST_USERNAME"],"struct":["GitHubUser"]};
