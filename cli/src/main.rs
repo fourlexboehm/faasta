@@ -1,7 +1,6 @@
 mod init;
 mod github_oauth;
 mod run;
-mod embedded_cert;
 
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
@@ -242,16 +241,10 @@ async fn main() {
             spinner.set_message(format!("Uploading function '{}' to server...", package_name));
             
             // Connect to the function service
-            // Use the embedded certificate
-            let cert_path = embedded_cert::get_cert_path().unwrap_or_else(|e| {
-                spinner.finish_and_clear();
-                eprintln!("Failed to create certificate file: {}", e);
-                exit(1);
-            });
             let server_addr = &args.server;
             
             // Use the connect function to get a client
-            let client = match run::connect_to_function_service(server_addr, &cert_path).await {
+            let client = match run::connect_to_function_service(server_addr).await {
                 Ok(client) => client,
                 Err(e) => {
                     spinner.finish_and_clear();
@@ -471,16 +464,10 @@ async fn main() {
                 spinner.set_message(format!("Uploading function '{}' to server...", package_name));
                 
                 // Connect to the function service
-                // Use the embedded certificate
-                let cert_path = embedded_cert::get_cert_path().unwrap_or_else(|e| {
-                    spinner.finish_and_clear();
-                    eprintln!("Failed to create certificate file: {}", e);
-                    exit(1);
-                });
                 let server_addr = &build_args.server;
                 
                 // Use the connect function to get a client
-                let client = match run::connect_to_function_service(server_addr, &cert_path).await {
+                let client = match run::connect_to_function_service(server_addr).await {
                     Ok(client) => client,
                     Err(e) => {
                         spinner.finish_and_clear();

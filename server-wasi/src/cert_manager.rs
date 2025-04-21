@@ -17,8 +17,6 @@ const LETS_ENCRYPT_STAGING_URL: &str = "https://acme-staging-v02.api.letsencrypt
 
 pub struct CertManager {
     domain: String,
-    // certs_dir is kept for future extension points
-    certs_dir: PathBuf,
     cert_path: PathBuf,
     key_path: PathBuf,
     account_key_path: PathBuf,
@@ -44,7 +42,6 @@ impl CertManager {
 
         Self {
             domain,
-            certs_dir,
             cert_path,
             key_path,
             account_key_path,

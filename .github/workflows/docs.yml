@@ -1,0 +1,30 @@
+name: Generate Documentation
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Generate documentation
+        run: cargo doc --no-deps --document-private-items --workspace
+      
+      - name: Create index.html
+        run: |
+          echo '<meta http-equiv="refresh" content="0; url=faasta_interface/index.html">' > target/doc/index.html
+      
+      - name: Deploy to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: target/doc
+          branch: gh-pages

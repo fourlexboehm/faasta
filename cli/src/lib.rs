@@ -1,6 +1,5 @@
 // Export modules
 pub mod github_oauth;
-pub mod embedded_cert;
 
 use std::process::Command;
 use std::path::{Path, PathBuf};

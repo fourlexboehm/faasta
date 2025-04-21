@@ -1,0 +1,90 @@
+name: Release Faasta
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-all:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_prefix: faasta-linux-x86_64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_prefix: faasta-macos-x86_64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            artifact_prefix: faasta-macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_prefix: faasta-windows-x86_64
+            extension: .exe
+    
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}, wasm32-wasi
+      
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        
+      - name: Build server-wasi
+        run: cargo build --release --package server-wasi --target ${{ matrix.target }}
+      
+      - name: Build cargo-faasta CLI
+        run: cargo build --release --package cargo-faasta --target ${{ matrix.target }}
+      
+      - name: Create output directory
+        run: mkdir -p target/artifacts
+        shell: bash
+      
+      - name: Prepare artifacts
+        run: |
+          cp target/${{ matrix.target }}/release/server-wasi${{ matrix.extension || '' }} target/artifacts/${{ matrix.artifact_prefix }}-server${{ matrix.extension || '' }}
+          cp target/${{ matrix.target }}/release/cargo-faasta${{ matrix.extension || '' }} target/artifacts/${{ matrix.artifact_prefix }}-cli${{ matrix.extension || '' }}
+        shell: bash
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_prefix }}
+          path: target/artifacts/
+          retention-days: 7
+
+  create-release:
+    needs: build-all
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+      
+      - name: Move artifacts to release directory
+        run: |
+          mkdir -p release-artifacts
+          find all-artifacts -type f -exec cp {} release-artifacts/ \;
+      
+      - name: Get version from tag
+        id: get_version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        shell: bash
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Faasta v${{ steps.get_version.outputs.VERSION }}
+          files: release-artifacts/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true

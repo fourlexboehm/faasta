@@ -18,25 +18,21 @@ const DEFAULT_CLIENT_ID: &str = "Iv23lik79igmHPi63dO1";
 const DEFAULT_CLIENT_SECRET: &str = "2a10cd3c2465622a1649b766e574f15eb9211eb7";
 const REDIRECT_PORT: u16 = 9876;
 
-// Test mode flag
-static mut TEST_MODE: bool = false;
-static mut TEST_USERNAME: Option<String> = None;
-static mut TEST_TOKEN: Option<String> = None;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
-/// Enable test mode for the OAuth flow
-pub fn enable_test_mode(username: String, token: String) {
-    unsafe {
-        TEST_MODE = true;
-        TEST_USERNAME = Some(username);
-        TEST_TOKEN = Some(token);
-    }
-}
+// Test mode flag
+static TEST_MODE: AtomicBool = AtomicBool::new(false);
+static TEST_USERNAME: Mutex<Option<String>> = Mutex::new(None);
+static TEST_TOKEN: Mutex<Option<String>> = Mutex::new(None);
 
 /// Get the test mode status and credentials
 fn get_test_data() -> (bool, Option<String>, Option<String>) {
-    unsafe {
-        (TEST_MODE, TEST_USERNAME.clone(), TEST_TOKEN.clone())
-    }
+    (
+        TEST_MODE.load(Ordering::Relaxed),
+        TEST_USERNAME.lock().unwrap().clone(),
+        TEST_TOKEN.lock().unwrap().clone()
+    )
 }
 
 /// Get client ID from environment or use default

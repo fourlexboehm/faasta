@@ -1,6 +1,4 @@
-use std::collections::HashMap;
 use dashmap::DashMap;
-use tokio::sync::Mutex;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -12,7 +10,6 @@ const MAX_PROJECTS_PER_USER: usize = 10;
 /// Struct to hold GitHub auth configuration
 pub struct GitHubAuth {
     user_projects: DashMap<String, UserData>,
-    tokens: Mutex<HashMap<String, String>>,
     db: sled::Db,
 }
 #[derive(Serialize, Deserialize, Clone, Debug, Encode, Decode)]
@@ -48,7 +45,6 @@ impl GitHubAuth {
         
         Ok(Self {
             user_projects,
-            tokens: Mutex::new(HashMap::new()),
             db,
         })
     }
@@ -142,21 +138,4 @@ impl GitHubAuth {
         false
     }
     
-    /// Get user data by function name
-    pub fn get_user_by_function(&self, function_name: &str) -> Option<String> {
-        for entry in self.user_projects.iter() {
-            if entry.projects.contains(&function_name.to_string()) {
-                return Some(entry.github_username.clone());
-            }
-        }
-        None
-    }
-    
-    /// Get the number of projects for a user
-    pub fn get_project_count(&self, username: &str) -> usize {
-        if let Some(user_data) = self.user_projects.get(username) {
-            return user_data.projects.len();
-        }
-        0
-    }
 }

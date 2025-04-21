@@ -5,7 +5,7 @@ use once_cell::sync::Lazy;
 use tracing::{debug, info, error};
 use tokio::time::{interval, Duration as TokioDuration};
 use bincode;
-use faasta_interface::{FunctionMetricsResponse, Metrics, FunctionError, FunctionResult};
+use faasta_interface::{FunctionMetricsResponse, Metrics};
 use std::str;
 
 
@@ -79,14 +79,6 @@ impl FunctionMetric {
         // No immediate persistence; metrics will be flushed periodically
     }
     
-    pub fn get_data(&self) -> (String, u64, u64, u64) {
-        (
-            self.function_name.clone(),
-            self.total_time.load(Ordering::Relaxed),
-            self.call_count.load(Ordering::Relaxed),
-            self.last_called.load(Ordering::Relaxed),
-        )
-    }
 }
 pub fn get_metrics() -> Metrics {
     let mut function_metrics = Vec::new();
@@ -200,75 +192,6 @@ impl Drop for Timer {
     }
 }
 
-// User project management functions
-
-/// Get the number of projects for a user
-pub fn get_user_project_count(username: &str) -> u32 {
-    let key = format!("user:{}", username);
-    
-    if let Ok(Some(data)) = METRICS_DB.get(key.as_bytes()) {
-        // First convert bytes to string, then parse the string as u32
-        if let Ok(s) = str::from_utf8(&data) {
-            if let Ok(count) = s.parse::<u32>() {
-                return count;
-            }
-        }
-    }
-    
-    // Default to 0 if not found or error
-    0
-}
-
-/// Increment the project count for a user
-pub fn increment_user_project_count(username: &str) -> FunctionResult<u32> {
-    let key = format!("user:{}", username);
-    let new_count = get_user_project_count(username) + 1;
-    
-    // Check if user has reached the project limit
-    if new_count > 10 {
-        return Err(FunctionError::PermissionDenied(
-            "User has reached the maximum limit of 10 projects".to_string()
-        ));
-    }
-    
-    // Store the new count
-    match METRICS_DB.insert(key.as_bytes(), new_count.to_string().as_bytes()) {
-        Ok(_) => {
-            debug!("Incremented project count for user '{}' to {}", username, new_count);
-            Ok(new_count)
-        },
-        Err(e) => {
-            error!("Failed to increment project count for user '{}': {}", username, e);
-            Err(FunctionError::InternalError(format!("Failed to update project count: {}", e)))
-        }
-    }
-}
-
-/// Decrement the project count for a user
-pub fn decrement_user_project_count(username: &str) -> FunctionResult<u32> {
-    let key = format!("user:{}", username);
-    let current_count = get_user_project_count(username);
-    
-    // Don't go below zero
-    let new_count = if current_count > 0 { current_count - 1 } else { 0 };
-    
-    // Store the new count
-    match METRICS_DB.insert(key.as_bytes(), new_count.to_string().as_bytes()) {
-        Ok(_) => {
-            debug!("Decremented project count for user '{}' to {}", username, new_count);
-            Ok(new_count)
-        },
-        Err(e) => {
-            error!("Failed to decrement project count for user '{}': {}", username, e);
-            Err(FunctionError::InternalError(format!("Failed to update project count: {}", e)))
-        }
-    }
-}
-
-/// Check if a user can create more projects
-pub fn can_create_project(username: &str) -> bool {
-    get_user_project_count(username) < 10
-}
 /// Flush in-memory metrics to persistent DB and reset counters.
 pub fn flush_metrics_to_db() {
     for entry in FUNCTION_METRICS.iter() {
