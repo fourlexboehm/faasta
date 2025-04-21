@@ -1,4 +1,3 @@
-use bincode;
 use dashmap::DashMap;
 use faasta_interface::{FunctionMetricsResponse, Metrics};
 use once_cell::sync::Lazy;
@@ -89,57 +88,55 @@ pub fn get_metrics() -> Metrics {
     let mut total_calls = 0;
 
     // Iterate through all entries in the sled database
-    for result in METRICS_DB.iter() {
-        if let Ok((key, value)) = result {
-            // Skip user project count entries (they start with "user:")
-            if key.starts_with(b"user:") {
-                continue;
-            }
+    for (key, value) in METRICS_DB.iter().flatten() {
+        // Skip user project count entries (they start with "user:")
+        if key.starts_with(b"user:") {
+            continue;
+        }
 
-            let function_name = match str::from_utf8(&key) {
-                Ok(name) => name.to_string(),
-                Err(_) => continue, // Skip invalid UTF-8 keys
-            };
+        let function_name = match str::from_utf8(&key) {
+            Ok(name) => name.to_string(),
+            Err(_) => continue, // Skip invalid UTF-8 keys
+        };
 
-            // Decode the DB metrics data
-            if let Ok(((db_total_time, db_call_count, db_last_called), _)) =
-                bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(
-                    &value,
-                    bincode::config::standard(),
-                )
-            {
-                // Load in-memory metrics
-                let (mem_total_time, mem_call_count, mem_last_called) = FUNCTION_METRICS
-                    .get(&function_name)
-                    .map(|m| {
-                        (
-                            m.total_time.load(Ordering::Relaxed),
-                            m.call_count.load(Ordering::Relaxed),
-                            m.last_called.load(Ordering::Relaxed),
-                        )
-                    })
-                    .unwrap_or((0, 0, 0));
+        // Decode the DB metrics data
+        if let Ok(((db_total_time, db_call_count, db_last_called), _)) =
+            bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(
+                &value,
+                bincode::config::standard(),
+            )
+        {
+            // Load in-memory metrics
+            let (mem_total_time, mem_call_count, mem_last_called) = FUNCTION_METRICS
+                .get(&function_name)
+                .map(|m| {
+                    (
+                        m.total_time.load(Ordering::Relaxed),
+                        m.call_count.load(Ordering::Relaxed),
+                        m.last_called.load(Ordering::Relaxed),
+                    )
+                })
+                .unwrap_or((0, 0, 0));
 
-                // Combine DB and in-memory metrics
-                let combined_total_time = db_total_time.saturating_add(mem_total_time);
-                let combined_call_count = db_call_count.saturating_add(mem_call_count);
-                let combined_last_called = std::cmp::max(db_last_called, mem_last_called);
+            // Combine DB and in-memory metrics
+            let combined_total_time = db_total_time.saturating_add(mem_total_time);
+            let combined_call_count = db_call_count.saturating_add(mem_call_count);
+            let combined_last_called = std::cmp::max(db_last_called, mem_last_called);
 
-                // Convert timestamp to ISO string
-                let last_called_time = UNIX_EPOCH + Duration::from_millis(combined_last_called);
-                let last_called_str =
-                    chrono::DateTime::<chrono::Utc>::from(last_called_time).to_rfc3339();
+            // Convert timestamp to ISO string
+            let last_called_time = UNIX_EPOCH + Duration::from_millis(combined_last_called);
+            let last_called_str =
+                chrono::DateTime::<chrono::Utc>::from(last_called_time).to_rfc3339();
 
-                function_metrics.push(FunctionMetricsResponse {
-                    function_name: function_name.clone(),
-                    total_time_millis: combined_total_time,
-                    call_count: combined_call_count,
-                    last_called: last_called_str,
-                });
+            function_metrics.push(FunctionMetricsResponse {
+                function_name: function_name.clone(),
+                total_time_millis: combined_total_time,
+                call_count: combined_call_count,
+                last_called: last_called_str,
+            });
 
-                total_time += combined_total_time;
-                total_calls += combined_call_count;
-            }
+            total_time += combined_total_time;
+            total_calls += combined_call_count;
         }
     }
 

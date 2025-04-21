@@ -1,9 +1,7 @@
 use crate::github_auth::GitHubAuth;
 use crate::metrics::get_metrics;
-use bincode;
 use dashmap::DashMap;
 use faasta_interface::{FunctionError, FunctionInfo, FunctionResult, FunctionService, Metrics};
-use sled;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
