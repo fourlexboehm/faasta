@@ -19,10 +19,6 @@ jobs:
           - os: macos-14
             target: aarch64-apple-darwin
             artifact_prefix: faasta-macos-arm64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_prefix: faasta-windows-x86_64
-            extension: .exe
     
     runs-on: ${{ matrix.os }}
     steps:
