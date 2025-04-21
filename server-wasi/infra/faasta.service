@@ -1,0 +1,35 @@
+[Unit]
+Description=Faasta Function-as-a-Service Platform
+After=network.target
+Documentation=https://github.com/fourlexboehm/faasta
+
+[Service]
+Type=simple
+User=faasta
+Group=faasta
+WorkingDirectory=/opt/faasta
+ExecStart=/bin/sh -lc 'exec /opt/faasta/faasta-server --base-domain faasta.xyz'
+Restart=on-failure
+RestartSec=5
+Environment=DATA_DIR=/var/lib/faasta
+
+# Logging
+StandardOutput=append:/var/log/faasta.log
+StandardError=append:/var/log/faasta.error.log
+
+# Limits
+LimitNOFILE=65536
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+# Security options
+ProtectSystem=full
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

@@ -14,6 +14,7 @@
       <sourceFolder url="file://$MODULE_DIR$/server-wasi/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/server-wasi/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/function/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/porkbun-cert-manager/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/FFI/target" />
       <excludeFolder url="file://$MODULE_DIR$/analyze/target" />
       <excludeFolder url="file://$MODULE_DIR$/cli/target" />

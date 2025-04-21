@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
-use lers::{solver::dns::CloudflareDns01Solver, Directory};
-use openssl::pkey::PKey;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
@@ -8,45 +9,48 @@ use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tracing::{info, warn};
 
-// Renew certificate if it expires in less than 30 days
-const CERT_RENEWAL_DAYS: u64 = 30;
+// Porkbun API response structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PorkbunResponse {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(rename = "certificatechain")]
+    pub certificate_chain: Option<String>,
+    #[serde(rename = "privatekey")]
+    pub private_key: Option<String>,
+    #[serde(rename = "publickey")]
+    pub public_key: Option<String>,
+    #[serde(rename = "intermediatecertificate")]
+    pub intermediate_certificate: Option<String>,
+}
 
-// Define constant URLs for Let's Encrypt
-const LETS_ENCRYPT_URL: &str = "https://acme-v02.api.letsencrypt.org/directory";
-const LETS_ENCRYPT_STAGING_URL: &str = "https://acme-staging-v02.api.letsencrypt.org/directory";
+// API request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PorkbunRequest {
+    pub apikey: String,
+    pub secretapikey: String,
+}
 
 pub struct CertManager {
     domain: String,
     cert_path: PathBuf,
     key_path: PathBuf,
-    account_key_path: PathBuf,
-    email: String,
-    use_staging: bool,
+    client: Client,
 }
 
 impl CertManager {
-    pub fn new(
-        domain: String,
-        certs_dir: PathBuf,
-        cert_path: PathBuf,
-        key_path: PathBuf,
-        email: String,
-        use_staging: bool,
-    ) -> Self {
+    pub fn new(domain: String, certs_dir: PathBuf, cert_path: PathBuf, key_path: PathBuf) -> Self {
         // Make sure the certs directory exists
         if !certs_dir.exists() {
             fs::create_dir_all(&certs_dir).expect("Failed to create certificates directory");
         }
 
-        let account_key_path = certs_dir.join("acme_account.key");
-
         Self {
             domain,
             cert_path,
             key_path,
-            account_key_path,
-            email,
-            use_staging,
+            client: Client::new(),
         }
     }
 
@@ -54,7 +58,7 @@ impl CertManager {
     fn needs_cert_renewal(&self) -> Result<bool> {
         // If cert doesn't exist, we need to renew
         if !self.cert_path.exists() {
-            info!("Certificate file doesn't exist, will create it");
+            info!("Certificate file doesn't exist, will download it");
             return Ok(true);
         }
 
@@ -66,8 +70,8 @@ impl CertManager {
                     Ok(time_left) => {
                         let days_left = time_left.as_secs() / (24 * 60 * 60);
                         info!("Certificate expires in {} days", days_left);
-                        // Renew if less than CERT_RENEWAL_DAYS left
-                        Ok(days_left < CERT_RENEWAL_DAYS)
+                        // Renew if less than 30 days left
+                        Ok(days_left < 30)
                     }
                     Err(_) => {
                         // If expiry is in the past, we need to renew
@@ -89,7 +93,7 @@ impl CertManager {
         let cert_data = fs::read(&self.cert_path)
             .with_context(|| format!("Failed to read certificate file: {:?}", self.cert_path))?;
 
-        let mut reader = std::io::Cursor::new(cert_data);
+        let mut reader = std::io::Cursor::new(&cert_data);
         let certs = rustls_pemfile::certs(&mut reader)
             .collect::<Result<Vec<_>, _>>()
             .context("Failed to parse certificate")?;
@@ -113,6 +117,82 @@ impl CertManager {
         Ok(system_time)
     }
 
+    // Retrieve SSL certificate from Porkbun API
+    async fn get_ssl(&self) -> Result<PorkbunResponse> {
+        // Get API keys from environment variables
+        let apikey = match env::var("PORKBUN_API_KEY") {
+            Ok(key) => key,
+            Err(_) => return Err(anyhow::anyhow!("PORKBUN_API_KEY environment variable not set. Please set it to your Porkbun API key.")),
+        };
+
+        let secretapikey = match env::var("PORKBUN_SECRET_API_KEY") {
+            Ok(key) => key,
+            Err(_) => return Err(anyhow::anyhow!("PORKBUN_SECRET_API_KEY environment variable not set. Please set it to your Porkbun Secret API key.")),
+        };
+
+        let url = format!(
+            "https://api.porkbun.com/api/json/v3/ssl/retrieve/{}",
+            self.domain
+        );
+
+        // Log some debug info (mask the actual API keys for security)
+        let apikey_masked = format!(
+            "{}...{}",
+            apikey.chars().take(4).collect::<String>(),
+            &apikey[apikey.len().saturating_sub(4)..]
+        );
+
+        let secretkey_masked = format!(
+            "{}...{}",
+            secretapikey.chars().take(4).collect::<String>(),
+            &secretapikey[secretapikey.len().saturating_sub(4)..]
+        );
+
+        info!(
+            "Using Porkbun API keys: {} and {}",
+            apikey_masked, secretkey_masked
+        );
+
+        let request_body = PorkbunRequest {
+            apikey: apikey.clone(),
+            secretapikey: secretapikey.clone(),
+        };
+
+        info!("Sending request to Porkbun API for domain: {}", self.domain);
+
+        let response = self
+            .client
+            .post(&url)
+            .json(&request_body)
+            .send()
+            .await
+            .context("Failed to send request to Porkbun API")?;
+
+        // Get the raw response text first for debugging
+        let response_text = response
+            .text()
+            .await
+            .context("Failed to read response body from Porkbun API")?;
+
+        info!("Received response from Porkbun API: {}", &response_text);
+
+        // Parse the response
+        let response_json: PorkbunResponse = serde_json::from_str(&response_text).context(
+            format!("Failed to parse Porkbun API response: {}", response_text),
+        )?;
+
+        if response_json.status == "ERROR" {
+            return Err(anyhow::anyhow!(
+                "Error retrieving SSL from Porkbun: {}",
+                response_json
+                    .message
+                    .unwrap_or_else(|| "Unknown error".to_string())
+            ));
+        }
+
+        Ok(response_json)
+    }
+
     // Obtain or renew the certificate
     pub async fn obtain_or_renew_certificate(&self) -> Result<()> {
         info!(
@@ -124,142 +204,51 @@ impl CertManager {
         let needs_renewal = self.needs_cert_renewal()?;
 
         if !needs_renewal {
-            info!(
-                "Certificate is still valid for more than {} days, skipping renewal",
-                CERT_RENEWAL_DAYS
-            );
+            info!("Certificate is still valid for more than 30 days, skipping renewal");
             return Ok(());
         }
 
-        // Certificate is expiring soon or doesn't exist, proceed with renewal
-        info!(
-            "Certificate is expiring in less than {} days or doesn't exist, will renew",
-            CERT_RENEWAL_DAYS
-        );
+        // Get certificates from Porkbun API
+        info!("Downloading certificates for domain: {}", self.domain);
+        let cert_json = self.get_ssl().await?;
 
-        // Configure Let's Encrypt client
-        info!("Setting up ACME client");
-        let solver = CloudflareDns01Solver::from_env()?.build()?;
-
-        let dir_url = if self.use_staging {
-            LETS_ENCRYPT_STAGING_URL
-        } else {
-            LETS_ENCRYPT_URL
-        };
-
-        let directory = Directory::builder(dir_url)
-            .dns01_solver(Box::new(solver))
-            .build()
-            .await?;
-
-        // Get or create ACME account
-        let account = if self.account_key_path.exists() {
-            // Load existing account key
-            let account_key_data = fs::read(&self.account_key_path).with_context(|| {
-                format!("Failed to read account key: {:?}", self.account_key_path)
-            })?;
-
-            // Parse the PEM-encoded private key
-            let key = PKey::private_key_from_pem(&account_key_data)
-                .with_context(|| "Failed to parse account private key")?;
-
-            // Access existing account
-            info!("Using existing ACME account");
-            directory
-                .account()
-                .private_key(key)
-                .contacts(vec![format!("mailto:{}", self.email)])
-                .terms_of_service_agreed(true)
-                .create_if_not_exists()
-                .await?
-        } else {
-            // Create new account with auto-generated key
-            info!("Creating new ACME account");
-            let account = directory
-                .account()
-                .contacts(vec![format!("mailto:{}", self.email)])
-                .terms_of_service_agreed(true)
-                .create_if_not_exists()
+        // Save domain certificate
+        if let Some(cert_chain) = cert_json.certificate_chain {
+            info!("Installing domain certificate to {:?}", self.cert_path);
+            let mut cert_file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&self.cert_path)
                 .await?;
-
-            // Save the account key
-            let private_key = account.private_key();
-            let pem = private_key
-                .private_key_to_pem_pkcs8()
-                .with_context(|| "Failed to convert private key to PEM")?;
-            fs::write(&self.account_key_path, pem)?;
-
-            account
-        };
-
-        // Create or use private key for certificate
-        let certificate = if self.key_path.exists() {
-            // Use existing private key for the certificate
-            info!("Using existing private key for certificate");
-
-            // Load the existing key
-            let key_data = fs::read(&self.key_path)
-                .with_context(|| format!("Failed to read private key: {:?}", self.key_path))?;
-
-            // Parse it for use with lers
-            let key = PKey::private_key_from_pem(&key_data)
-                .with_context(|| "Failed to parse private key")?;
-
-            // Obtain new certificate with the existing key
-            account
-                .certificate()
-                .add_domain(format!("*.{}", self.domain))
-                .add_domain(self.domain.clone())
-                .private_key(key)
-                .obtain()
-                .await?
+            cert_file.write_all(cert_chain.as_bytes()).await?;
         } else {
-            // First time creation - generate new certificate and key
-            info!("No existing private key found, generating new one (first-time setup)");
-            account
-                .certificate()
-                .add_domain(format!("*.{}", self.domain))
-                .add_domain(self.domain.clone())
-                .obtain()
-                .await?
-        };
+            return Err(anyhow::anyhow!(
+                "Certificate chain missing in Porkbun API response"
+            ));
+        }
 
-        // Save the certificate file
-        info!("Saving certificate file");
-        let mut cert_file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&self.cert_path)
-            .await
-            .with_context(|| {
-                format!("Failed to open cert file for writing: {:?}", self.cert_path)
-            })?;
-
-        cert_file.write_all(&certificate.to_pem()?).await?;
-
-        // Save private key only if it doesn't exist (first-time setup)
-        if !self.key_path.exists() {
-            info!("Creating private key file (first-time setup)");
+        // Save private key
+        if let Some(private_key) = cert_json.private_key {
+            info!("Installing private key to {:?}", self.key_path);
             let mut key_file = OpenOptions::new()
                 .write(true)
                 .create(true)
                 .truncate(true)
                 .mode(0o600) // Ensure proper permissions
                 .open(&self.key_path)
-                .await
-                .with_context(|| {
-                    format!("Failed to open key file for writing: {:?}", self.key_path)
-                })?;
-
-            key_file
-                .write_all(&certificate.private_key_to_pem()?)
                 .await?;
+            key_file.write_all(private_key.as_bytes()).await?;
         } else {
-            info!("Keeping existing private key (never regenerated)");
+            return Err(anyhow::anyhow!(
+                "Private key missing in Porkbun API response"
+            ));
         }
 
-        info!("Successfully renewed certificate for: {}", self.domain);
+        info!(
+            "Successfully downloaded certificates for domain: {}",
+            self.domain
+        );
         Ok(())
     }
 }

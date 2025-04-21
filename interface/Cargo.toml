@@ -2,6 +2,8 @@
 name = "faasta-interface"
 version = "0.1.0"
 edition = "2021"
+description = "tarpc types for the faasta serverless platform"
+license = "MIT"
 
 [dependencies]
 anyhow = { workspace = true }

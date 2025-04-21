@@ -1,3 +1,5 @@
+#![warn(unused_extern_crates)]
+
 use anyhow::{anyhow, bail, Context, Result};
 use bytes::Bytes;
 use clap::Parser;
@@ -131,12 +133,12 @@ impl MyServer {
 
             debug!("Processing request for function: {}", subdomain);
 
-            // Create a timer for this function call
-            let _ = Timer::new(subdomain.to_string());
+            // Use direct function name approach
+            let wasm_filename = format!("{}.wasm", subdomain);
+            debug!("Looking for WASM file: {}", wasm_filename);
 
-            // Check if function exists
-            // Convert hyphens to underscores in function name for the WASM file
-            let wasm_filename = format!("{}.wasm", subdomain.replace('-', "_"));
+            // Create a timer for this function call
+            let _timer = Timer::new(subdomain.to_string());
             let function_path = self.functions_dir.join(wasm_filename);
             if !function_path.exists() {
                 return text_response(404, "Not Found");
@@ -242,8 +244,8 @@ struct Args {
     #[arg(short, long, env = "LISTEN_ADDR", default_value = "0.0.0.0:443")]
     listen_addr: SocketAddr,
 
-    /// Base domain for function subdomains (e.g., faasta.xyz)
-    #[arg(long, env = "BASE_DOMAIN", required = true)]
+    /// Base domain for function subdomains
+    #[arg(long, env = "BASE_DOMAIN", default_value = "faasta.xyz")]
     base_domain: String,
 
     /// Path to the TLS certificate file (PEM format)
@@ -279,7 +281,7 @@ struct Args {
     functions_path: PathBuf,
 }
 
-fn load_tls_config(args: &Args) -> Result<Arc<ServerConfig>> {
+async fn load_tls_config(args: &Args) -> Result<Arc<ServerConfig>> {
     // Load TLS certificate
     let cert_file = File::open(&args.tls_cert_path)
         .with_context(|| format!("Failed to open TLS cert file: {:?}", args.tls_cert_path))?;
@@ -368,14 +370,12 @@ async fn main() -> Result<()> {
 
     // Setup certificate management
     if args.auto_cert {
-        // Create CertManager instance
+        // Create CertManager instance for Porkbun
         let cert_manager = CertManager::new(
             args.base_domain.clone(),
             args.certs_dir.clone(),
             args.tls_cert_path.clone(),
             args.tls_key_path.clone(),
-            args.letsencrypt_email.clone(),
-            args.letsencrypt_staging,
         );
 
         // Obtain or renew certificate if needed
@@ -428,7 +428,7 @@ async fn main() -> Result<()> {
     metrics::spawn_periodic_flush(60 * 60);
 
     // Load TLS configuration
-    let tls_config = load_tls_config(&args)?;
+    let tls_config = load_tls_config(&args).await?;
 
     let tls_acceptor = TlsAcceptor::from(tls_config.clone());
 

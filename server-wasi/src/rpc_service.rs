@@ -1,9 +1,7 @@
 use crate::github_auth::GitHubAuth;
 use crate::metrics::get_metrics;
-use bincode;
 use dashmap::DashMap;
 use faasta_interface::{FunctionError, FunctionInfo, FunctionResult, FunctionService, Metrics};
-use sled;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -194,27 +192,45 @@ impl FunctionService for FunctionServiceImpl {
             ));
         }
 
-        // Determine WASM file path (convert hyphens to underscores)
-        let wasm_filename = format!("{}.wasm", name.replace('-', "_"));
+        // Check WASM file size
+        if wasm_file.len() > faasta_interface::MAX_WASM_SIZE {
+            return Err(FunctionError::InvalidInput(format!(
+                "WASM file too large. Maximum allowed size is 30MB, but received {} bytes",
+                wasm_file.len()
+            )));
+        }
+
+        // Simple direct approach: use the exact function name for the WASM file
+        let wasm_filename = format!("{}.wasm", name);
         let wasm_path = self.functions_dir.join(&wasm_filename);
 
-        // Check if function already exists (in memory or on disk)
+        // Check if function already exists
         if self.functions_db.contains_key(&name) || wasm_path.exists() {
-            // Ensure the user owns this function
-            if !self.github_auth.verify_function_ownership(&username, &name) {
+            if let Some(entry) = self.functions_db.get(&name) {
+                // Check if user owns the function
+                if entry.owner != username {
+                    return Err(FunctionError::PermissionDenied(
+                        "A function with this name already exists and belongs to another user"
+                            .to_string(),
+                    ));
+                }
+                // Function exists and user owns it - proceed with update
+            } else {
+                // Function exists on disk but not in memory db - this is inconsistent state
+                // Still enforce ownership check through GitHub auth
                 return Err(FunctionError::PermissionDenied(
-                    "A function with this name already exists and belongs to another user"
+                    "A function with this name already exists. Please choose a different name."
                         .to_string(),
                 ));
             }
-            // Existing function owned by user: proceed with update
         } else {
-            // New function: enforce project limit and register ownership
+            // New function - enforce project limit
             if !self.github_auth.can_upload_project(&username, &name) {
                 return Err(FunctionError::PermissionDenied(
                     "You have reached the maximum limit of 10 projects".to_string(),
                 ));
             }
+            // Register ownership
             match self.github_auth.add_project(&username, &name).await {
                 Ok(_) => debug!("Added project '{}' for user '{}'", name, username),
                 Err(e) => {
@@ -226,6 +242,8 @@ impl FunctionService for FunctionServiceImpl {
                 }
             }
         }
+
+        // Write the WASM file
         let mut file = fs::File::create(&wasm_path)
             .map_err(|e| FunctionError::InternalError(format!("Failed to create file: {}", e)))?;
         file.write_all(&wasm_file)
@@ -323,9 +341,8 @@ impl FunctionService for FunctionServiceImpl {
             // Remove function from database
             self.functions_db.remove(&name);
 
-            // Remove WASM file
-            // Convert hyphens to underscores in function name for the WASM file
-            let wasm_filename = format!("{}.wasm", name.replace('-', "_"));
+            // Remove WASM file using direct name
+            let wasm_filename = format!("{}.wasm", name);
             let wasm_path = self.functions_dir.join(wasm_filename);
             if wasm_path.exists() {
                 fs::remove_file(wasm_path).map_err(|e| {

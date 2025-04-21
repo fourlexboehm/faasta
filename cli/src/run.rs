@@ -24,13 +24,10 @@ fn same_file_path(a: &str, b: &str) -> bool {
 
 // Create a connection to the function service
 pub async fn connect_to_function_service(server_addr: &str) -> Result<FunctionServiceClient> {
-    // Set up the QUIC client
+    // Set up the QUIC client with minimal logging
     let client = Client::builder()
-        // .with_tls(tls)
-        // .with_tls(tls_cert_path)
-        // .context("Failed to set up TLS")?
         .with_io("0.0.0.0:0")
-        .context("Failed to set up IO")?
+        .context("Failed to set up client IO")?
         .start()
         .context("Failed to start client")?;
 
@@ -50,24 +47,44 @@ pub async fn connect_to_function_service(server_addr: &str) -> Result<FunctionSe
             let port = parts[1].parse::<u16>().context("Invalid port number")?;
 
             // For localhost, use 127.0.0.1
-            if hostname == "localhost" {
+            if hostname == "localhost" || hostname == "localhost.localdomain" {
                 format!("127.0.0.1:{}", port)
                     .parse()
                     .context("Failed to parse localhost address")?
             } else {
                 // For other hostnames, try to resolve using DNS
-                // This is a simplified approach - in a real implementation, you'd use DNS resolution
-                return Err(anyhow!(
-                    "Non-localhost hostnames not supported yet. Use IP address directly."
-                ));
+                match tokio::net::lookup_host(format!("{}:{}", hostname, port)).await {
+                    Ok(mut addrs) => {
+                        // Take the first resolved address
+                        if let Some(addr) = addrs.next() {
+                            addr
+                        } else {
+                            return Err(anyhow!(
+                                "Could not resolve hostname: {}. No addresses found.",
+                                hostname
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        return Err(anyhow!(
+                            "Could not resolve hostname: {}. Error: {}",
+                            hostname,
+                            e
+                        ));
+                    }
+                }
             }
         }
     };
 
-    let server_name = if server_addr.starts_with("localhost:") {
+    let server_name = if server_addr.starts_with("localhost:")
+        || server_addr.contains("localhost.localdomain:")
+    {
         "localhost".to_string()
     } else {
-        addr.ip().to_string()
+        // Extract the hostname from the original server_addr string for SNI
+        let parts: Vec<&str> = server_addr.split(':').collect();
+        parts[0].to_string()
     };
 
     let connect = Connect::new(addr).with_server_name(server_name.as_str());
@@ -75,8 +92,20 @@ pub async fn connect_to_function_service(server_addr: &str) -> Result<FunctionSe
     let mut connection = client
         .connect(connect)
         .await
-        .map_err(|e| anyhow!("Failed to connect: {}", e))?;
+        .map_err(|e| {
+            // Provide minimal error info for handshake failures
+            if e.to_string().contains("handshake") {
+                if e.to_string().contains("timeout") {
+                    anyhow!("Failed to connect: Handshake timeout. Check your network connection or firewall settings.")
+                } else {
+                    anyhow!("Failed to connect: TLS handshake error. The server may be down or unreachable.")
+                }
+            } else {
+                anyhow!("Failed to connect: {}", e)
+            }
+        })?;
 
+    // Open bidirectional stream
     let stream = connection
         .open_bidirectional_stream()
         .await
@@ -174,7 +203,7 @@ pub async fn handle_run(port: u16) -> io::Result<()> {
     if !package_root.join("src").join("lib.rs").exists() {
         spinner.finish_and_clear();
         eprintln!("Error: src/lib.rs is missing. This file is required for FaaSta functions.");
-        eprintln!("Hint: Run 'cargo faasta new <name>' to create a new FaaSta project.");
+        eprintln!("Hint: Run 'cargo faasta new <n>' to create a new FaaSta project.");
         exit(1);
     }
 

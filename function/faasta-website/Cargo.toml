@@ -1,0 +1,21 @@
+[package]
+name = "website"
+version = "0.1.0"
+edition = "2024"
+description = "Official website for the Faasta project using WASI-HTTP"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1"
+http = "1"
+spin-sdk = "3"
+maud = "0.27"
+
+# reduce wasm binary size
+[profile.release]
+lto = true
+strip = "symbols"
+
+[workspace]

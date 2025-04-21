@@ -113,44 +113,8 @@ jobs:
           path: target/artifacts/
           retention-days: 7
 
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip2
-      
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        
-      - name: Build server-wasi (Windows)
-        run: cargo build --release --package server-wasi
-      
-      - name: Build cargo-faasta CLI (Windows)
-        run: cargo build --release --package cargo-faasta
-      
-      - name: Create output directory
-        run: mkdir -p target/artifacts
-        shell: bash
-      
-      - name: Prepare artifacts
-        run: |
-          cp target/release/server-wasi.exe target/artifacts/faasta-server-windows-x86_64.exe
-          cp target/release/cargo-faasta.exe target/artifacts/cargo-faasta-windows-x86_64.exe
-        shell: bash
-      
-      - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: faasta-windows-x86_64
-          path: target/artifacts/
-          retention-days: 7
-
   create-release:
-    needs: [build-linux, build-macos, build-macos-arm, build-windows]
+    needs: [build-linux, build-macos, build-macos-arm]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
@@ -169,7 +133,6 @@ jobs:
           cp all-artifacts/faasta-linux-x86_64/* release-artifacts/
           cp all-artifacts/faasta-macos-x86_64/* release-artifacts/
           cp all-artifacts/faasta-macos-arm64/* release-artifacts/
-          cp all-artifacts/faasta-windows-x86_64/* release-artifacts/
       
       - name: Create Release
         id: create_release
