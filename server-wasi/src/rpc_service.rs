@@ -1,14 +1,14 @@
-use crate::metrics::get_metrics;
 use crate::github_auth::GitHubAuth;
-use faasta_interface::{FunctionInfo, FunctionError, FunctionResult, FunctionService, Metrics};
-use std::path::PathBuf;
-use std::sync::Arc;
+use crate::metrics::get_metrics;
+use bincode;
+use dashmap::DashMap;
+use faasta_interface::{FunctionError, FunctionInfo, FunctionResult, FunctionService, Metrics};
+use sled;
 use std::fs;
 use std::io::Write;
-use dashmap::DashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{debug, error};
-use sled;
-use bincode;
 
 /// Sled tree name for function metadata
 const FUNCTIONS_DB_TREE: &str = "functions";
@@ -63,20 +63,23 @@ impl FunctionServiceImpl {
             functions_tree,
         })
     }
-    
+
     /// Validate GitHub authentication token
     async fn validate_auth(&self, username: &str, token: &str) -> anyhow::Result<bool> {
         // Check if the token is in the format "username:token"
         if let Some((_, token_value)) = token.split_once(':') {
             // If we have the username:token format, extract just the token part
-            return self.github_auth.validate_oauth_token(username, token_value).await;
+            return self
+                .github_auth
+                .validate_oauth_token(username, token_value)
+                .await;
         }
-        
+
         // If the token is not in the expected format, use it as is
         // This maintains backward compatibility with other token formats
         self.github_auth.validate_oauth_token(username, token).await
     }
-    
+
     /// Extract username from GitHub token
     async fn get_username_from_token(&self, token: &str) -> FunctionResult<String> {
         // Check if the token is in the format "username:token"
@@ -84,7 +87,7 @@ impl FunctionServiceImpl {
             // If we already have the username in the token format, validate it with GitHub
             // Extract token from "Bearer {token}" format if present
             let token_value = token_value.strip_prefix("Bearer ").unwrap_or(token_value);
-            
+
             // Create client to verify with GitHub API
             let client = reqwest::Client::new();
             let response = client
@@ -93,36 +96,39 @@ impl FunctionServiceImpl {
                 .header("Authorization", format!("Bearer {}", token_value))
                 .send()
                 .await
-                .map_err(|e| FunctionError::AuthError(format!("Failed to contact GitHub API: {}", e)))?;
-            
+                .map_err(|e| {
+                    FunctionError::AuthError(format!("Failed to contact GitHub API: {}", e))
+                })?;
+
             if !response.status().is_success() {
                 return Err(FunctionError::AuthError(format!(
                     "GitHub API returned error status: {}",
                     response.status()
                 )));
             }
-            
+
             // Verify the username matches what GitHub returns
-            let github_user: serde_json::Value = response
-                .json()
-                .await
-                .map_err(|e| FunctionError::AuthError(format!("Failed to parse GitHub response: {}", e)))?;
-            
-            let api_username = github_user["login"]
-                .as_str()
-                .ok_or_else(|| FunctionError::AuthError("Username not found in GitHub response".to_string()))?;
-            
+            let github_user: serde_json::Value = response.json().await.map_err(|e| {
+                FunctionError::AuthError(format!("Failed to parse GitHub response: {}", e))
+            })?;
+
+            let api_username = github_user["login"].as_str().ok_or_else(|| {
+                FunctionError::AuthError("Username not found in GitHub response".to_string())
+            })?;
+
             if username != api_username {
-                return Err(FunctionError::AuthError("Username mismatch in GitHub authentication".to_string()));
+                return Err(FunctionError::AuthError(
+                    "Username mismatch in GitHub authentication".to_string(),
+                ));
             }
-            
+
             return Ok(username.to_string());
         }
-        
+
         // Fallback to the old method if the token is not in the expected format
         // Extract token from "Bearer {token}" format if present
         let token_value = token.strip_prefix("Bearer ").unwrap_or(token);
-        
+
         // Create client to verify with GitHub API
         let client = reqwest::Client::new();
         let response = client
@@ -131,25 +137,26 @@ impl FunctionServiceImpl {
             .header("Authorization", format!("Bearer {}", token_value))
             .send()
             .await
-            .map_err(|e| FunctionError::AuthError(format!("Failed to contact GitHub API: {}", e)))?;
-        
+            .map_err(|e| {
+                FunctionError::AuthError(format!("Failed to contact GitHub API: {}", e))
+            })?;
+
         if !response.status().is_success() {
             return Err(FunctionError::AuthError(format!(
                 "GitHub API returned error status: {}",
                 response.status()
             )));
         }
-        
+
         // Extract username from response
-        let github_user: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| FunctionError::AuthError(format!("Failed to parse GitHub response: {}", e)))?;
-        
-        let username = github_user["login"]
-            .as_str()
-            .ok_or_else(|| FunctionError::AuthError("Username not found in GitHub response".to_string()))?;
-        
+        let github_user: serde_json::Value = response.json().await.map_err(|e| {
+            FunctionError::AuthError(format!("Failed to parse GitHub response: {}", e))
+        })?;
+
+        let username = github_user["login"].as_str().ok_or_else(|| {
+            FunctionError::AuthError("Username not found in GitHub response".to_string())
+        })?;
+
         Ok(username.to_string())
     }
 }
@@ -164,20 +171,29 @@ impl FunctionService for FunctionServiceImpl {
     ) -> FunctionResult<String> {
         // Extract username from token
         let username = self.get_username_from_token(&github_auth_token).await?;
-        
+
         // Validate token
-        if !self.validate_auth(&username, &github_auth_token).await.map_err(|e| 
-            FunctionError::AuthError(e.to_string()))? {
-            return Err(FunctionError::AuthError("Invalid GitHub authentication token".to_string()));
+        if !self
+            .validate_auth(&username, &github_auth_token)
+            .await
+            .map_err(|e| FunctionError::AuthError(e.to_string()))?
+        {
+            return Err(FunctionError::AuthError(
+                "Invalid GitHub authentication token".to_string(),
+            ));
         }
-        
+
         // Check if function name is valid
-        if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        {
             return Err(FunctionError::InvalidInput(
                 "Invalid function name. Use only alphanumeric characters, underscores, and hyphens.".to_string()
             ));
         }
-        
+
         // Determine WASM file path (convert hyphens to underscores)
         let wasm_filename = format!("{}.wasm", name.replace('-', "_"));
         let wasm_path = self.functions_dir.join(&wasm_filename);
@@ -187,7 +203,8 @@ impl FunctionService for FunctionServiceImpl {
             // Ensure the user owns this function
             if !self.github_auth.verify_function_ownership(&username, &name) {
                 return Err(FunctionError::PermissionDenied(
-                    "A function with this name already exists and belongs to another user".to_string()
+                    "A function with this name already exists and belongs to another user"
+                        .to_string(),
                 ));
             }
             // Existing function owned by user: proceed with update
@@ -195,22 +212,25 @@ impl FunctionService for FunctionServiceImpl {
             // New function: enforce project limit and register ownership
             if !self.github_auth.can_upload_project(&username, &name) {
                 return Err(FunctionError::PermissionDenied(
-                    "You have reached the maximum limit of 10 projects".to_string()
+                    "You have reached the maximum limit of 10 projects".to_string(),
                 ));
             }
             match self.github_auth.add_project(&username, &name).await {
                 Ok(_) => debug!("Added project '{}' for user '{}'", name, username),
                 Err(e) => {
                     error!("Failed to add project: {}", e);
-                    return Err(FunctionError::InternalError(format!("Failed to add project: {}", e)));
+                    return Err(FunctionError::InternalError(format!(
+                        "Failed to add project: {}",
+                        e
+                    )));
                 }
             }
         }
-        let mut file = fs::File::create(&wasm_path).map_err(|e| 
-            FunctionError::InternalError(format!("Failed to create file: {}", e)))?;
-        file.write_all(&wasm_file).map_err(|e| 
-            FunctionError::InternalError(format!("Failed to write file: {}", e)))?;
-        
+        let mut file = fs::File::create(&wasm_path)
+            .map_err(|e| FunctionError::InternalError(format!("Failed to create file: {}", e)))?;
+        file.write_all(&wasm_file)
+            .map_err(|e| FunctionError::InternalError(format!("Failed to write file: {}", e)))?;
+
         // Create function info
         let now = chrono::Utc::now().to_rfc3339();
         let function_info = FunctionInfo {
@@ -219,19 +239,28 @@ impl FunctionService for FunctionServiceImpl {
             published_at: now,
             usage: format!("https://{}.faasta.xyz", name),
         };
-        
+
         // Save in-memory and persist metadata to sled
-        self.functions_db.insert(name.clone(), function_info.clone());
+        self.functions_db
+            .insert(name.clone(), function_info.clone());
         // Serialize metadata with bincode
-        let meta = bincode::encode_to_vec(&function_info, bincode::config::standard())
-            .map_err(|e| FunctionError::InternalError(format!("Failed to serialize function metadata: {}", e)))?;
+        let meta =
+            bincode::encode_to_vec(&function_info, bincode::config::standard()).map_err(|e| {
+                FunctionError::InternalError(format!(
+                    "Failed to serialize function metadata: {}",
+                    e
+                ))
+            })?;
         // Persist metadata to sled
-        self.functions_tree.insert(name.as_bytes(), meta)
-            .map_err(|e| FunctionError::InternalError(format!("Failed to persist function metadata: {}", e)))?;
-        
+        self.functions_tree
+            .insert(name.as_bytes(), meta)
+            .map_err(|e| {
+                FunctionError::InternalError(format!("Failed to persist function metadata: {}", e))
+            })?;
+
         Ok(format!("Function '{}' published successfully", name))
     }
-    
+
     async fn list_functions(
         self,
         _: tarpc::context::Context,
@@ -239,13 +268,18 @@ impl FunctionService for FunctionServiceImpl {
     ) -> FunctionResult<Vec<FunctionInfo>> {
         // Extract username from token
         let username = self.get_username_from_token(&github_auth_token).await?;
-        
+
         // Validate token
-        if !self.validate_auth(&username, &github_auth_token).await.map_err(|e| 
-            FunctionError::AuthError(e.to_string()))? {
-            return Err(FunctionError::AuthError("Invalid GitHub authentication token".to_string()));
+        if !self
+            .validate_auth(&username, &github_auth_token)
+            .await
+            .map_err(|e| FunctionError::AuthError(e.to_string()))?
+        {
+            return Err(FunctionError::AuthError(
+                "Invalid GitHub authentication token".to_string(),
+            ));
         }
-        
+
         // Filter functions by owner
         let user_functions: Vec<FunctionInfo> = self
             .functions_db
@@ -253,10 +287,10 @@ impl FunctionService for FunctionServiceImpl {
             .filter(|entry| entry.owner == username)
             .map(|entry| entry.clone())
             .collect();
-        
+
         Ok(user_functions)
     }
-    
+
     async fn unpublish(
         self,
         _: tarpc::context::Context,
@@ -265,57 +299,66 @@ impl FunctionService for FunctionServiceImpl {
     ) -> FunctionResult<()> {
         // Extract username from token
         let username = self.get_username_from_token(&github_auth_token).await?;
-        
+
         // Validate token
-        if !self.validate_auth(&username, &github_auth_token).await.map_err(|e| 
-            FunctionError::AuthError(e.to_string()))? {
-            return Err(FunctionError::AuthError("Invalid GitHub authentication token".to_string()));
+        if !self
+            .validate_auth(&username, &github_auth_token)
+            .await
+            .map_err(|e| FunctionError::AuthError(e.to_string()))?
+        {
+            return Err(FunctionError::AuthError(
+                "Invalid GitHub authentication token".to_string(),
+            ));
         }
-        
+
         // Check if function exists
         if let Some(entry) = self.functions_db.get(&name) {
             // Check if user owns the function
             if entry.owner != username {
                 return Err(FunctionError::PermissionDenied(
-                    "You don't have permission to unpublish this function".to_string()
+                    "You don't have permission to unpublish this function".to_string(),
                 ));
             }
-            
+
             // Remove function from database
             self.functions_db.remove(&name);
-            
+
             // Remove WASM file
             // Convert hyphens to underscores in function name for the WASM file
             let wasm_filename = format!("{}.wasm", name.replace('-', "_"));
             let wasm_path = self.functions_dir.join(wasm_filename);
             if wasm_path.exists() {
-                fs::remove_file(wasm_path).map_err(|e| 
-                    FunctionError::InternalError(format!("Failed to remove file: {}", e)))?;
+                fs::remove_file(wasm_path).map_err(|e| {
+                    FunctionError::InternalError(format!("Failed to remove file: {}", e))
+                })?;
             }
-            
+
             // Remove the project from the user's list
             match self.github_auth.remove_project(&username, &name).await {
                 Ok(_) => {
                     debug!("Removed project '{}' for user '{}'", name, username);
-                },
+                }
                 Err(e) => {
                     error!("Failed to remove project: {}", e);
                     // We don't return an error here because the function was already removed
                     // Just log the error
                 }
             }
-            
+
             // Remove metadata from sled
             if let Err(e) = self.functions_tree.remove(name.as_bytes()) {
                 error!("Failed to remove function metadata for '{}': {}", name, e);
             }
-            
+
             Ok(())
         } else {
-            Err(FunctionError::NotFound(format!("Function '{}' not found", name)))
+            Err(FunctionError::NotFound(format!(
+                "Function '{}' not found",
+                name
+            )))
         }
     }
-    
+
     async fn get_metrics(
         self,
         _: tarpc::context::Context,
@@ -323,16 +366,21 @@ impl FunctionService for FunctionServiceImpl {
     ) -> FunctionResult<Metrics> {
         // Extract username from token
         let username = self.get_username_from_token(&github_auth_token).await?;
-        
+
         // Validate token
-        if !self.validate_auth(&username, &github_auth_token).await.map_err(|e|
-            FunctionError::AuthError(e.to_string()))? {
-            return Err(FunctionError::AuthError("Invalid GitHub authentication token".to_string()));
+        if !self
+            .validate_auth(&username, &github_auth_token)
+            .await
+            .map_err(|e| FunctionError::AuthError(e.to_string()))?
+        {
+            return Err(FunctionError::AuthError(
+                "Invalid GitHub authentication token".to_string(),
+            ));
         }
-        
+
         // Use the metrics module to get metrics from sled
         let metrics = get_metrics();
-        
+
         Ok(metrics)
     }
 }

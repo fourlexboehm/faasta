@@ -1,9 +1,9 @@
 // Export modules
 pub mod github_oauth;
 
-use std::process::Command;
-use std::path::{Path, PathBuf};
 use serde_json::Value;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// Find a workspace root package if it exists; otherwise pick the
 /// current/only package from cargo metadata.
@@ -38,7 +38,10 @@ pub fn find_root_package() -> Result<(PathBuf, String, PathBuf), Box<dyn std::er
     };
 
     // Build what we expect for the "root" package's manifest path
-    let root_manifest_path = workspace_root.join("Cargo.toml").to_string_lossy().to_string();
+    let root_manifest_path = workspace_root
+        .join("Cargo.toml")
+        .to_string_lossy()
+        .to_string();
 
     // Try to find a package that matches the workspace root
     for pkg in packages {

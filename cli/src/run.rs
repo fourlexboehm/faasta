@@ -1,17 +1,17 @@
-use std::io;
 use anyhow::{anyhow, Context, Result};
 use faasta_interface::FunctionServiceClient;
+use std::io;
 // futures prelude removed
-use s2n_quic::Client;
 use s2n_quic::client::Connect;
+use s2n_quic::Client;
+use std::fs;
+use std::net::SocketAddr;
 use std::path::{Path as StdPath, PathBuf};
+use std::process::exit;
 use tarpc::serde_transport as transport;
 use tarpc::tokio_serde::formats::Bincode;
 use tarpc::tokio_util::codec::LengthDelimitedCodec;
 use tracing::debug;
-use std::net::SocketAddr;
-use std::process::exit;
-use std::fs;
 
 /// Compare two file paths in a slightly more robust way.
 /// (On Windows, e.g., backslash vs forward slash).
@@ -26,7 +26,7 @@ fn same_file_path(a: &str, b: &str) -> bool {
 pub async fn connect_to_function_service(server_addr: &str) -> Result<FunctionServiceClient> {
     // Set up the QUIC client
     let client = Client::builder()
-    // .with_tls(tls)
+        // .with_tls(tls)
         // .with_tls(tls_cert_path)
         // .context("Failed to set up TLS")?
         .with_io("0.0.0.0:0")
@@ -41,31 +41,37 @@ pub async fn connect_to_function_service(server_addr: &str) -> Result<FunctionSe
             // Try to resolve the hostname
             let parts: Vec<&str> = server_addr.split(':').collect();
             if parts.len() != 2 {
-                return Err(anyhow!("Invalid server address format. Expected hostname:port or IP:port"));
+                return Err(anyhow!(
+                    "Invalid server address format. Expected hostname:port or IP:port"
+                ));
             }
-            
+
             let hostname = parts[0];
             let port = parts[1].parse::<u16>().context("Invalid port number")?;
-            
+
             // For localhost, use 127.0.0.1
             if hostname == "localhost" {
-                format!("127.0.0.1:{}", port).parse().context("Failed to parse localhost address")?
+                format!("127.0.0.1:{}", port)
+                    .parse()
+                    .context("Failed to parse localhost address")?
             } else {
                 // For other hostnames, try to resolve using DNS
                 // This is a simplified approach - in a real implementation, you'd use DNS resolution
-                return Err(anyhow!("Non-localhost hostnames not supported yet. Use IP address directly."));
+                return Err(anyhow!(
+                    "Non-localhost hostnames not supported yet. Use IP address directly."
+                ));
             }
         }
     };
-    
+
     let server_name = if server_addr.starts_with("localhost:") {
         "localhost".to_string()
     } else {
         addr.ip().to_string()
     };
-    
+
     let connect = Connect::new(addr).with_server_name(server_name.as_str());
-    
+
     let mut connection = client
         .connect(connect)
         .await
@@ -89,78 +95,81 @@ pub async fn handle_run(port: u16) -> io::Result<()> {
     let spinner = indicatif::ProgressBar::new_spinner();
     spinner.set_message("Building project...");
     spinner.enable_steady_tick(std::time::Duration::from_millis(100));
-// Get package info using cargo metadata
-let output = std::process::Command::new("cargo")
-    .args(["metadata", "--format-version=1"])
-    .output()
-    .unwrap_or_else(|e| {
+    // Get package info using cargo metadata
+    let output = std::process::Command::new("cargo")
+        .args(["metadata", "--format-version=1"])
+        .output()
+        .unwrap_or_else(|e| {
+            spinner.finish_and_clear();
+            eprintln!("Failed to run cargo metadata: {}", e);
+            exit(1);
+        });
+
+    if !output.status.success() {
         spinner.finish_and_clear();
-        eprintln!("Failed to run cargo metadata: {}", e);
+        eprintln!("Failed to retrieve cargo metadata");
+        exit(1);
+    }
+
+    // Parse JSON
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
+        spinner.finish_and_clear();
+        eprintln!("Failed to parse cargo metadata: {}", e);
         exit(1);
     });
 
-if !output.status.success() {
-    spinner.finish_and_clear();
-    eprintln!("Failed to retrieve cargo metadata");
-    exit(1);
-}
+    // Extract target_directory
+    let target_directory = metadata
+        .get("target_directory")
+        .and_then(serde_json::Value::as_str)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            spinner.finish_and_clear();
+            eprintln!("No 'target_directory' found in cargo metadata");
+            exit(1);
+        });
 
-// Parse JSON
-let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
-    spinner.finish_and_clear();
-    eprintln!("Failed to parse cargo metadata: {}", e);
-    exit(1);
-});
+    // Get the package name from the current directory's Cargo.toml
+    let packages = metadata
+        .get("packages")
+        .and_then(serde_json::Value::as_array)
+        .unwrap_or_else(|| {
+            spinner.finish_and_clear();
+            eprintln!("No 'packages' found in cargo metadata");
+            exit(1);
+        });
 
-// Extract target_directory
-let target_directory = metadata.get("target_directory")
-    .and_then(serde_json::Value::as_str)
-    .map(PathBuf::from)
-    .unwrap_or_else(|| {
+    // Find the package for the current directory
+    let current_dir = std::env::current_dir().unwrap_or_else(|e| {
         spinner.finish_and_clear();
-        eprintln!("No 'target_directory' found in cargo metadata");
+        eprintln!("Failed to get current directory: {}", e);
         exit(1);
     });
 
-// Get the package name from the current directory's Cargo.toml
-let packages = metadata.get("packages")
-    .and_then(serde_json::Value::as_array)
-    .unwrap_or_else(|| {
-        spinner.finish_and_clear();
-        eprintln!("No 'packages' found in cargo metadata");
-        exit(1);
-    });
+    let package_name = packages
+        .iter()
+        .filter_map(|pkg| {
+            let manifest_path = pkg.get("manifest_path")?.as_str()?;
+            let pkg_dir = StdPath::new(manifest_path).parent()?;
+            if same_file_path(&pkg_dir.to_string_lossy(), &current_dir.to_string_lossy()) {
+                pkg.get("name")?.as_str().map(String::from)
+            } else {
+                None
+            }
+        })
+        .next()
+        .unwrap_or_else(|| {
+            spinner.finish_and_clear();
+            eprintln!("Could not find package for current directory");
+            exit(1);
+        });
 
-// Find the package for the current directory
-let current_dir = std::env::current_dir().unwrap_or_else(|e| {
-    spinner.finish_and_clear();
-    eprintln!("Failed to get current directory: {}", e);
-    exit(1);
-});
-
-let package_name = packages.iter()
-    .filter_map(|pkg| {
-        let manifest_path = pkg.get("manifest_path")?.as_str()?;
-        let pkg_dir = StdPath::new(manifest_path).parent()?;
-        if same_file_path(&pkg_dir.to_string_lossy(), &current_dir.to_string_lossy()) {
-            pkg.get("name")?.as_str().map(String::from)
-        } else {
-            None
-        }
-    })
-    .next()
-    .unwrap_or_else(|| {
-        spinner.finish_and_clear();
-        eprintln!("Could not find package for current directory");
-        exit(1);
-    });
-
-let package_root = current_dir;
+    let package_root = current_dir;
 
     // Display project info
     println!("Building project: {}", package_name);
     println!("Project root: {}", package_root.display());
-    
+
     // Validate the project structure
     if !package_root.join("src").join("lib.rs").exists() {
         spinner.finish_and_clear();
@@ -173,7 +182,7 @@ let package_root = current_dir;
 
     // Build the project for wasm32-wasip2 target
     spinner.set_message("Building optimized WASI component...");
-    
+
     // Build with wasm32-wasip2 target
     let status = std::process::Command::new("cargo")
         .args(["build", "--release", "--target", "wasm32-wasip2"])
@@ -184,32 +193,38 @@ let package_root = current_dir;
             eprintln!("Failed to run cargo build: {}", e);
             exit(1);
         });
-        
+
     if !status.success() {
         spinner.finish_and_clear();
         eprintln!("Build failed");
         exit(1);
     }
-    
+
     // Convert to component using wasm-tools
     spinner.set_message("Converting to WASI component...");
-    
+
     // Convert hyphens to underscores in package name for the WASM file
     let wasm_filename = format!("{}.wasm", package_name.replace('-', "_"));
     let wasm_path = target_directory
         .join("wasm32-wasip2")
         .join("release")
         .join(wasm_filename);
-        
+
     // Convert hyphens to underscores in package name for the component file
     let component_filename = format!("{}_component.wasm", package_name.replace('-', "_"));
     let component_path = target_directory
         .join("wasm32-wasip2")
         .join("release")
         .join(component_filename);
-    
+
     let status = std::process::Command::new("wasm-tools")
-        .args(["component", "new", wasm_path.to_str().unwrap(), "-o", component_path.to_str().unwrap()])
+        .args([
+            "component",
+            "new",
+            wasm_path.to_str().unwrap(),
+            "-o",
+            component_path.to_str().unwrap(),
+        ])
         .current_dir(&package_root)
         .status()
         .unwrap_or_else(|e| {
@@ -217,7 +232,7 @@ let package_root = current_dir;
             eprintln!("Failed to run wasm-tools: {}", e);
             exit(1);
         });
-        
+
     if !status.success() {
         spinner.finish_and_clear();
         eprintln!("Component conversion failed");
@@ -226,12 +241,12 @@ let package_root = current_dir;
 
     spinner.finish_and_clear();
     println!("✅ Build successful!");
-    
+
     // Run the function locally using wasmtime serve
     println!("Starting local function server on port {}...", port);
     println!("Function URL: http://localhost:{}", port);
     println!("Press Ctrl+C to stop the server");
-    
+
     // Path to the compiled WASI component
     // Convert hyphens to underscores in package name for the component file
     let component_filename = format!("{}_component.wasm", package_name.replace('-', "_"));
@@ -239,41 +254,54 @@ let package_root = current_dir;
         .join("wasm32-wasip2")
         .join("release")
         .join(component_filename);
-    
+
     if !component_path.exists() {
-        eprintln!("Error: Could not find compiled WASI component at: {}", component_path.display());
+        eprintln!(
+            "Error: Could not find compiled WASI component at: {}",
+            component_path.display()
+        );
         exit(1);
     }
-    
+
     println!("Loading function from: {}", component_path.display());
-    
+
     // Copy the component to the server's functions directory for deployment
     let server_functions_dir = PathBuf::from("server-wasi/functions");
     if !server_functions_dir.exists() {
-        fs::create_dir_all(&server_functions_dir).expect("Failed to create server functions directory");
+        fs::create_dir_all(&server_functions_dir)
+            .expect("Failed to create server functions directory");
     }
-    
+
     // Use the original package name for the server function path (server handles the conversion)
     let server_function_path = server_functions_dir.join(format!("{}.wasm", package_name));
-    fs::copy(&component_path, &server_function_path)
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to copy component to server functions directory: {}", e);
-            exit(1);
-        });
-    
+    fs::copy(&component_path, &server_function_path).unwrap_or_else(|e| {
+        eprintln!(
+            "Failed to copy component to server functions directory: {}",
+            e
+        );
+        exit(1);
+    });
+
     println!("Deployed function to: {}", server_function_path.display());
     println!("Running function with wasmtime serve...");
-    
+
     // Run wasmtime serve with the component
     let status = std::process::Command::new("wasmtime")
-        .args(["serve", "--http-port", &port.to_string(), "--addr", "127.0.0.1", component_path.to_str().unwrap()])
+        .args([
+            "serve",
+            "--http-port",
+            &port.to_string(),
+            "--addr",
+            "127.0.0.1",
+            component_path.to_str().unwrap(),
+        ])
         .current_dir(&package_root)
         .status()
         .unwrap_or_else(|e| {
             eprintln!("Failed to run wasmtime serve: {}", e);
             exit(1);
         });
-    
+
     if !status.success() {
         eprintln!("wasmtime serve exited with an error");
         exit(1);

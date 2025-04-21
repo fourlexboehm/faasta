@@ -1,43 +1,42 @@
 use anyhow::{anyhow, bail, Context, Result};
 use bytes::Bytes;
 use clap::Parser;
+use faasta_interface::FunctionService;
 use http_body_util::{BodyExt, Full};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{body::Incoming, header::HOST, Request, Response};
-use faasta_interface::FunctionService;
-mod rpc_service;
 mod cert_manager;
 mod github_auth;
+mod rpc_service;
 use github_auth::GitHubAuth;
-use rpc_service::FunctionServiceImpl;
 mod metrics;
-use metrics::Timer;
-use tarpc::server::{BaseChannel, Channel};
-use tarpc::serde_transport as transport;
 use cert_manager::CertManager;
+use metrics::Timer;
+use tarpc::serde_transport as transport;
+use tarpc::server::{BaseChannel, Channel};
 use tarpc::tokio_serde::formats::Bincode;
 use tarpc::tokio_util::codec::LengthDelimitedCodec;
 // Removed unused imports from lers
+use dashmap::DashMap;
 use futures::prelude::*;
 use rustls_pemfile::{certs, private_key};
-use wasmtime_wasi::bindings::LinkOptions;
 use std::fs::File;
 use std::io::BufReader;
 use std::net::SocketAddr;
-use std::path::{PathBuf, Path};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use dashmap::DashMap;
 use tokio::net::TcpListener;
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
+use tracing::{debug, error, info, Level};
 use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
+use wasmtime_wasi::bindings::LinkOptions;
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi_http::bindings::http::types::{ErrorCode, Scheme};
 use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::body::HyperOutgoingBody;
-use tracing::{debug, error, info, Level};
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 
@@ -91,8 +90,6 @@ struct MyServer {
     pre_cache: DashMap<String, ProxyPre<MyClientState>>,
     base_domain: String,
     functions_dir: PathBuf,
-    // function_service is kept for extensibility
-    function_service: Arc<FunctionServiceImpl>,
     github_auth: Arc<GitHubAuth>,
 }
 
@@ -105,14 +102,6 @@ impl MyServer {
     ) -> Result<Self> {
         // Initialize GitHub auth
         let github_auth = Arc::new(GitHubAuth::new(metadata_db.clone()).await?);
-        
-        // Create function service with GitHub auth handler
-        let github_auth_clone = github_auth.clone();
-        let function_service = rpc_service::create_service_with_github_auth(
-            functions_dir.clone(),
-            github_auth_clone,
-            metadata_db.clone(),
-        ).expect("Failed to create function service");
 
         Ok(Self {
             engine,
@@ -120,7 +109,6 @@ impl MyServer {
             pre_cache: DashMap::new(),
             base_domain,
             functions_dir,
-            function_service: Arc::new(function_service),
             github_auth,
         })
     }
@@ -142,9 +130,9 @@ impl MyServer {
             }
 
             debug!("Processing request for function: {}", subdomain);
-            
+
             // Create a timer for this function call
-            let _timer = Timer::new(subdomain.to_string());
+            let _ = Timer::new(subdomain.to_string());
 
             // Check if function exists
             // Convert hyphens to underscores in function name for the WASM file
@@ -235,9 +223,10 @@ impl MyServer {
 
         // Create the ProxyPre
         let pre = ProxyPre::new(linker.instantiate_pre(&component)?)?;
-        
+
         // Cache it for future use
-        self.pre_cache.insert(function_name.to_string(), pre.clone());
+        self.pre_cache
+            .insert(function_name.to_string(), pre.clone());
 
         Ok(pre)
     }
@@ -261,7 +250,7 @@ struct Args {
     #[arg(long, env = "TLS_CERT", default_value = "./certs/cert.pem")]
     tls_cert_path: PathBuf,
 
-    /// Path to the TLS private key file (PEM format) 
+    /// Path to the TLS private key file (PEM format)
     #[arg(long, env = "TLS_KEY", default_value = "./certs/key.pem")]
     tls_key_path: PathBuf,
 
@@ -336,11 +325,13 @@ async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<MyServer>) {
                         server_clone.functions_dir.clone(),
                         github_auth_clone,
                         server_clone.metadata_db.clone(),
-                    ).expect("Failed to create function service");
-                    
+                    )
+                    .expect("Failed to create function service");
+
                     // Process this connection
                     let server_channel = BaseChannel::with_defaults(transport);
-                    server_channel.execute(service_clone.serve())
+                    server_channel
+                        .execute(service_clone.serve())
                         .for_each(|fut| {
                             tokio::spawn(fut);
                             async {}
@@ -357,11 +348,13 @@ async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<MyServer>) {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Install default crypto provider for rustls
-    rustls::crypto::ring::default_provider().install_default().expect("Failed to install crypto provider");
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install crypto provider");
 
     // Load environment variables from .env file if present
     let _ = dotenvy::dotenv();
-    
+
     // Initialize tracing
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
@@ -372,7 +365,7 @@ async fn main() -> Result<()> {
     std::fs::create_dir_all(&args.db_path)?;
     std::fs::create_dir_all(&args.functions_path)?;
     std::fs::create_dir_all(&args.certs_dir)?;
-    
+
     // Setup certificate management
     if args.auto_cert {
         // Create CertManager instance
@@ -384,20 +377,30 @@ async fn main() -> Result<()> {
             args.letsencrypt_email.clone(),
             args.letsencrypt_staging,
         );
-        
+
         // Obtain or renew certificate if needed
-        cert_manager.obtain_or_renew_certificate().await
+        cert_manager
+            .obtain_or_renew_certificate()
+            .await
             .context("Failed to obtain/renew TLS certificate")?;
     }
 
     // Create a clone for use in the QUIC server task
     let args_clone = args.clone();
-    
-    info!("Starting server-wasi with base domain: {}", args.base_domain);
-    
+
+    info!(
+        "Starting server-wasi with base domain: {}",
+        args.base_domain
+    );
+
     // Ensure metrics database directory exists
-    let metrics_db_path = std::env::var("METRICS_DB_PATH").unwrap_or_else(|_| "./data/metrics".to_string());
-    std::fs::create_dir_all(std::path::Path::new(&metrics_db_path).parent().unwrap_or_else(|| std::path::Path::new(".")))?;
+    let metrics_db_path =
+        std::env::var("METRICS_DB_PATH").unwrap_or_else(|_| "./data/metrics".to_string());
+    std::fs::create_dir_all(
+        std::path::Path::new(&metrics_db_path)
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(".")),
+    )?;
 
     // Open/create component cache database
     let pre_cache = sled::open(&args.db_path)?;
@@ -412,20 +415,21 @@ async fn main() -> Result<()> {
     let engine = Engine::new(&config)?;
 
     // Create server
-    let server = Arc::new(MyServer::new(
-        engine,
-        pre_cache,
-        args.base_domain.clone(),
-        args.functions_path.clone(),
-    ).await?);
+    let server = Arc::new(
+        MyServer::new(
+            engine,
+            pre_cache,
+            args.base_domain.clone(),
+            args.functions_path.clone(),
+        )
+        .await?,
+    );
     // Spawn a background task to flush metrics to DB every hour
     metrics::spawn_periodic_flush(60 * 60);
-    
+
     // Load TLS configuration
     let tls_config = load_tls_config(&args)?;
-    
 
-    
     let tls_acceptor = TlsAcceptor::from(tls_config.clone());
 
     // Start listening for connections
@@ -438,10 +442,13 @@ async fn main() -> Result<()> {
     let server_clone = server.clone();
     tokio::spawn(async move {
         let addr = "0.0.0.0:4433".parse::<std::net::SocketAddr>().unwrap();
-        
+
         // Configure server with the TLS certs
         let quic_server = s2n_quic::Server::builder()
-            .with_tls((Path::new(&args_clone.tls_cert_path), Path::new(&args_clone.tls_key_path)))
+            .with_tls((
+                Path::new(&args_clone.tls_cert_path),
+                Path::new(&args_clone.tls_key_path),
+            ))
             .map_err(|e| anyhow::anyhow!("Failed to set up TLS: {:?}", e))
             .expect("Failed to set up TLS")
             .with_io(addr)
@@ -452,7 +459,7 @@ async fn main() -> Result<()> {
             .expect("Failed to start server");
 
         info!("RPC service listening on {}", addr);
-        
+
         // Process connections
         run_server(quic_server, server_clone).await;
     });
