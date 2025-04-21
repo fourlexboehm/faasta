@@ -1,13 +1,12 @@
+use bincode;
+use dashmap::DashMap;
+use faasta_interface::{FunctionMetricsResponse, Metrics};
+use once_cell::sync::Lazy;
+use std::str;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use dashmap::DashMap;
-use once_cell::sync::Lazy;
-use tracing::{debug, info, error};
 use tokio::time::{interval, Duration as TokioDuration};
-use bincode;
-use faasta_interface::{FunctionMetricsResponse, Metrics};
-use std::str;
-
+use tracing::{debug, error, info};
 
 // Global metrics storage using DashMap for concurrent access
 pub static FUNCTION_METRICS: Lazy<DashMap<String, FunctionMetric>> = Lazy::new(DashMap::new);
@@ -30,7 +29,12 @@ impl FunctionMetric {
     pub fn new(function_name: String) -> Self {
         // Try to load from sled if it exists
         let metric = if let Ok(Some(data)) = METRICS_DB.get(function_name.as_bytes()) {
-            if let Ok(((total_time, call_count, last_called), _)) = bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(&data, bincode::config::standard()) {
+            if let Ok(((total_time, call_count, last_called), _)) =
+                bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(
+                    &data,
+                    bincode::config::standard(),
+                )
+            {
                 Self {
                     function_name,
                     total_time: AtomicU64::new(total_time),
@@ -59,14 +63,14 @@ impl FunctionMetric {
     pub fn record_call(&self, duration_ms: u64) {
         self.total_time.fetch_add(duration_ms, Ordering::Relaxed);
         self.call_count.fetch_add(1, Ordering::Relaxed);
-        
+
         // Update last called timestamp (milliseconds since epoch)
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::from_secs(0))
             .as_millis() as u64;
         self.last_called.store(now, Ordering::Relaxed);
-        
+
         // Log the metrics update
         debug!(
             "Recorded metrics for function '{}': duration={}ms, total_calls={}, total_time={}ms",
@@ -75,10 +79,9 @@ impl FunctionMetric {
             self.call_count.load(Ordering::Relaxed),
             self.total_time.load(Ordering::Relaxed)
         );
-        
+
         // No immediate persistence; metrics will be flushed periodically
     }
-    
 }
 pub fn get_metrics() -> Metrics {
     let mut function_metrics = Vec::new();
@@ -124,8 +127,8 @@ pub fn get_metrics() -> Metrics {
 
                 // Convert timestamp to ISO string
                 let last_called_time = UNIX_EPOCH + Duration::from_millis(combined_last_called);
-                let last_called_str = chrono::DateTime::<chrono::Utc>::from(last_called_time)
-                    .to_rfc3339();
+                let last_called_str =
+                    chrono::DateTime::<chrono::Utc>::from(last_called_time).to_rfc3339();
 
                 function_metrics.push(FunctionMetricsResponse {
                     function_name: function_name.clone(),
@@ -160,7 +163,7 @@ pub fn get_or_create_metric(function_name: &str) -> FunctionMetric {
         let metric = FunctionMetric::new(function_name.to_string());
         FUNCTION_METRICS.insert(function_name.to_string(), metric);
     }
-    
+
     // Get a copy of the metric
     let entry = FUNCTION_METRICS.get(function_name).unwrap();
     FunctionMetric::new(entry.function_name.clone())
@@ -186,7 +189,7 @@ impl Drop for Timer {
         let duration = SystemTime::now()
             .duration_since(self.start)
             .unwrap_or(Duration::from_secs(0));
-        
+
         let metric = get_or_create_metric(&self.function_name);
         metric.record_call(duration.as_millis() as u64);
     }
@@ -208,10 +211,11 @@ pub fn flush_metrics_to_db() {
         // Load existing DB values
         let existing = METRICS_DB.get(function_name.as_bytes()).unwrap_or(None);
         let (db_total, db_calls, db_last) = if let Some(db_bytes) = existing {
-            if let Ok(((t, c, l), _)) = bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(
-                &db_bytes,
-                bincode::config::standard(),
-            ) {
+            if let Ok(((t, c, l), _)) = bincode::decode_from_slice::<
+                (u64, u64, u64),
+                bincode::config::Configuration,
+            >(&db_bytes, bincode::config::standard())
+            {
                 (t, c, l)
             } else {
                 (0, 0, 0)
@@ -225,14 +229,23 @@ pub fn flush_metrics_to_db() {
         let new_last = std::cmp::max(db_last, mem_last);
 
         // Serialize and insert
-        match bincode::encode_to_vec((new_total, new_calls, new_last), bincode::config::standard()) {
+        match bincode::encode_to_vec(
+            (new_total, new_calls, new_last),
+            bincode::config::standard(),
+        ) {
             Ok(data) => {
                 if let Err(e) = METRICS_DB.insert(function_name.as_bytes(), data) {
-                    error!("Failed to persist flushed metrics for {}: {}", function_name, e);
+                    error!(
+                        "Failed to persist flushed metrics for {}: {}",
+                        function_name, e
+                    );
                 }
             }
             Err(e) => {
-                error!("Failed to encode flushed metrics for {}: {}", function_name, e);
+                error!(
+                    "Failed to encode flushed metrics for {}: {}",
+                    function_name, e
+                );
             }
         }
 
