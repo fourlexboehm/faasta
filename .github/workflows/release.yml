@@ -31,7 +31,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}, wasm32-wasi
+          targets: ${{ matrix.target }}, wasm32-wasip2
       
       - name: Rust cache
         uses: Swatinem/rust-cache@v2

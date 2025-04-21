@@ -50,6 +50,7 @@ jobs:
           WORKDIR /app
           COPY . .
           RUN apt-get update && apt-get install -y pkg-config libssl-dev
+          RUN rustup target add wasm32-wasip2
           RUN cargo build --release --package server-wasi
 
           FROM debian:bookworm-slim
