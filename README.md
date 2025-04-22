@@ -15,11 +15,6 @@ Faasta is a cutting-edge Function-as-a-Service (FaaS) platform designed for exce
 
 ---
 
-Your code is compiled to WebAssembly with **strict safety requirements**, ensuring:
-1. 🔒 Secure execution within the WebAssembly sandbox
-2. ✅ Whitelisted dependencies
-3. 🌐 Standards-compliant implementation using WASI P2 and WASIHTTP
-
 ## Getting Started
 
 Install the Faasta CLI:
