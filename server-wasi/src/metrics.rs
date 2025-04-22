@@ -3,8 +3,9 @@ use faasta_interface::{FunctionMetricsResponse, Metrics};
 use once_cell::sync::Lazy;
 use std::str;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::time::{interval, Duration as TokioDuration};
+use tokio::time::{interval, Duration as TokioDuration}; 
 use tracing::{debug, error, info};
 
 // Global metrics storage using DashMap for concurrent access
@@ -121,14 +122,24 @@ impl FunctionMetric {
         }
     }
 }
+
+// Function to check if a function's WASM file exists
+fn function_wasm_exists(function_name: &str) -> bool {
+    // Get the functions directory from environment or use default
+    let functions_dir = std::env::var("FUNCTIONS_PATH").unwrap_or_else(|_| "./functions".to_string());
+    
+    let wasm_filename = format!("{}.wasm", function_name);
+    let wasm_path = Path::new(&functions_dir).join(&wasm_filename);
+    
+    wasm_path.exists()
+}
+
 pub fn get_metrics() -> Metrics {
     let mut function_metrics = Vec::new();
     let mut total_time = 0;
     let mut total_calls = 0;
 
-    // Iterate through all entries in the sled database
     for (key, value) in METRICS_DB.iter().flatten() {
-        // Skip user project count entries (they start with "user:")
         if key.starts_with(b"user:") {
             continue;
         }
@@ -194,11 +205,14 @@ pub fn get_metrics() -> Metrics {
 }
 
 // Helper function to get or create a function metric
-pub fn get_or_create_metric(function_name: &str) -> FunctionMetric {
-    // Check if function exists in memory cache
+pub fn get_or_create_metric(function_name: &str) -> Option<FunctionMetric> {
     let is_new_function = !FUNCTION_METRICS.contains_key(function_name);
 
     if is_new_function {
+        // First check if the function's WASM file exists
+        if !function_wasm_exists(function_name) {
+            return None
+        }
         // Create the new metric
         let metric = FunctionMetric::new(function_name.to_string());
         FUNCTION_METRICS.insert(function_name.to_string(), metric);
@@ -218,7 +232,7 @@ pub fn get_or_create_metric(function_name: &str) -> FunctionMetric {
                             "Failed to encode initial metrics for new function {}: {}",
                             function_name, e
                         );
-                        return FunctionMetric::new(function_name.to_string());
+                        return FunctionMetric::new(function_name.to_string()).into();
                     }
                 };
             let _ = METRICS_DB.insert(function_name.as_bytes(), initial_data);
@@ -227,7 +241,7 @@ pub fn get_or_create_metric(function_name: &str) -> FunctionMetric {
     }
     // Get a copy of the metric
     let entry = FUNCTION_METRICS.get(function_name).unwrap();
-    FunctionMetric::new(entry.function_name.clone())
+    FunctionMetric::new(entry.function_name.clone()).into()
 }
 
 // Timer utility to measure function execution time
@@ -251,8 +265,10 @@ impl Drop for Timer {
             .duration_since(self.start)
             .unwrap_or(Duration::from_secs(0));
 
-        let metric = get_or_create_metric(&self.function_name);
-        metric.record_call(duration.as_millis() as u64);
+        if let Some(metric) = get_or_create_metric(&self.function_name) {
+            metric.record_call(duration.as_millis() as u64);
+
+        }
     }
 }
 

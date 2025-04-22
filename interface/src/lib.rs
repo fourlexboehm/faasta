@@ -9,6 +9,8 @@ use std::time::{Duration, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
+pub const MAX_WASM_SIZE: usize = 30 * 1024 * 1024;
+
 // Define a custom error type that can be serialized
 #[derive(Debug, Error, Serialize, Deserialize, Clone)]
 pub enum FunctionError {

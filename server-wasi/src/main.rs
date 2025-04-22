@@ -130,13 +130,13 @@ impl MyServer {
             }
 
             debug!("Processing request for function: {}", subdomain);
-
+            
+            // Use direct function name approach
+            let wasm_filename = format!("{}.wasm", subdomain);
+            debug!("Looking for WASM file: {}", wasm_filename);
+            
             // Create a timer for this function call
-            let _ = Timer::new(subdomain.to_string());
-
-            // Check if function exists
-            // Convert hyphens to underscores in function name for the WASM file
-            let wasm_filename = format!("{}.wasm", subdomain.replace('-', "_"));
+            let _timer = Timer::new(subdomain.to_string());
             let function_path = self.functions_dir.join(wasm_filename);
             if !function_path.exists() {
                 return text_response(404, "Not Found");
