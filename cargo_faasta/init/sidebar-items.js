@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["HTTP_CARGO_TOML","HTTP_LIB_RS"],"fn":["handle_new","rewrite_package_name","write_files"]};
