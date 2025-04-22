@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for Faasta updates
+Requires=faasta-updater.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+Unit=faasta-updater.service
+
+[Install]
+WantedBy=timers.target

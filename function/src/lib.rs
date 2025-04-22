@@ -17,17 +17,17 @@ fn hello_world(req: http::Request<()>) -> anyhow::Result<impl IntoResponse> {
             }
         })
         .unwrap_or("World");
-    
+
     // Extract path from the URL
     let path = req.uri().path();
-    
+
     // Get user agent
     let user_agent = req
         .headers()
         .get(http::header::USER_AGENT)
         .map(|h| h.to_str().unwrap_or("Unknown"))
         .unwrap_or("Unknown");
-    
+
     // Build response with HTML
     let html = format!(
         r#"<!DOCTYPE html>
