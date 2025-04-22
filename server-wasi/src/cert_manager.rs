@@ -40,12 +40,7 @@ pub struct CertManager {
 }
 
 impl CertManager {
-    pub fn new(
-        domain: String,
-        certs_dir: PathBuf,
-        cert_path: PathBuf,
-        key_path: PathBuf,
-    ) -> Self {
+    pub fn new(domain: String, certs_dir: PathBuf, cert_path: PathBuf, key_path: PathBuf) -> Self {
         // Make sure the certs directory exists
         if !certs_dir.exists() {
             fs::create_dir_all(&certs_dir).expect("Failed to create certificates directory");
@@ -54,7 +49,7 @@ impl CertManager {
         Self {
             domain,
             cert_path,
-            key_path, 
+            key_path,
             client: Client::new(),
         }
     }
@@ -129,55 +124,69 @@ impl CertManager {
             Ok(key) => key,
             Err(_) => return Err(anyhow::anyhow!("PORKBUN_API_KEY environment variable not set. Please set it to your Porkbun API key.")),
         };
-        
+
         let secretapikey = match env::var("PORKBUN_SECRET_API_KEY") {
             Ok(key) => key,
             Err(_) => return Err(anyhow::anyhow!("PORKBUN_SECRET_API_KEY environment variable not set. Please set it to your Porkbun Secret API key.")),
         };
-            
-        let url = format!("https://api.porkbun.com/api/json/v3/ssl/retrieve/{}", self.domain);
-        
+
+        let url = format!(
+            "https://api.porkbun.com/api/json/v3/ssl/retrieve/{}",
+            self.domain
+        );
+
         // Log some debug info (mask the actual API keys for security)
-        let apikey_masked = format!("{}...{}", 
-            apikey.chars().take(4).collect::<String>(), 
-            &apikey[apikey.len().saturating_sub(4)..]);
-            
-        let secretkey_masked = format!("{}...{}", 
-            secretapikey.chars().take(4).collect::<String>(), 
-            &secretapikey[secretapikey.len().saturating_sub(4)..]);
-            
-        info!("Using Porkbun API keys: {} and {}", apikey_masked, secretkey_masked);
-        
+        let apikey_masked = format!(
+            "{}...{}",
+            apikey.chars().take(4).collect::<String>(),
+            &apikey[apikey.len().saturating_sub(4)..]
+        );
+
+        let secretkey_masked = format!(
+            "{}...{}",
+            secretapikey.chars().take(4).collect::<String>(),
+            &secretapikey[secretapikey.len().saturating_sub(4)..]
+        );
+
+        info!(
+            "Using Porkbun API keys: {} and {}",
+            apikey_masked, secretkey_masked
+        );
+
         let request_body = PorkbunRequest {
             apikey: apikey.clone(),
             secretapikey: secretapikey.clone(),
         };
-        
+
         info!("Sending request to Porkbun API for domain: {}", self.domain);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post(&url)
             .json(&request_body)
             .send()
             .await
             .context("Failed to send request to Porkbun API")?;
-            
+
         // Get the raw response text first for debugging
         let response_text = response
             .text()
             .await
             .context("Failed to read response body from Porkbun API")?;
-        
+
         info!("Received response from Porkbun API: {}", &response_text);
-            
+
         // Parse the response
-        let response_json: PorkbunResponse = serde_json::from_str(&response_text)
-            .context(format!("Failed to parse Porkbun API response: {}", response_text))?;
+        let response_json: PorkbunResponse = serde_json::from_str(&response_text).context(
+            format!("Failed to parse Porkbun API response: {}", response_text),
+        )?;
 
         if response_json.status == "ERROR" {
             return Err(anyhow::anyhow!(
                 "Error retrieving SSL from Porkbun: {}",
-                response_json.message.unwrap_or_else(|| "Unknown error".to_string())
+                response_json
+                    .message
+                    .unwrap_or_else(|| "Unknown error".to_string())
             ));
         }
 
@@ -195,9 +204,7 @@ impl CertManager {
         let needs_renewal = self.needs_cert_renewal()?;
 
         if !needs_renewal {
-            info!(
-                "Certificate is still valid for more than 30 days, skipping renewal"
-            );
+            info!("Certificate is still valid for more than 30 days, skipping renewal");
             return Ok(());
         }
 
@@ -216,7 +223,9 @@ impl CertManager {
                 .await?;
             cert_file.write_all(cert_chain.as_bytes()).await?;
         } else {
-            return Err(anyhow::anyhow!("Certificate chain missing in Porkbun API response"));
+            return Err(anyhow::anyhow!(
+                "Certificate chain missing in Porkbun API response"
+            ));
         }
 
         // Save private key
@@ -231,10 +240,15 @@ impl CertManager {
                 .await?;
             key_file.write_all(private_key.as_bytes()).await?;
         } else {
-            return Err(anyhow::anyhow!("Private key missing in Porkbun API response"));
+            return Err(anyhow::anyhow!(
+                "Private key missing in Porkbun API response"
+            ));
         }
 
-        info!("Successfully downloaded certificates for domain: {}", self.domain);
+        info!(
+            "Successfully downloaded certificates for domain: {}",
+            self.domain
+        );
         Ok(())
     }
 }

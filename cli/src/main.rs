@@ -611,7 +611,7 @@ async fn main() {
                 }
             }
         }
-        
+
         Commands::Metrics(args) => {
             let spinner = indicatif::ProgressBar::new_spinner();
             spinner.set_message("Fetching metrics...");
@@ -619,23 +619,21 @@ async fn main() {
 
             // Load GitHub config for authentication
             let github_config = match load_config() {
-                Ok(config) => {
-                    match (config.github_username, config.github_token) {
-                        (Some(username), Some(token)) => Some((username, token)),
-                        _ => {
-                            spinner.finish_and_clear();
-                            println!("No GitHub credentials found. Run 'cargo faasta login' to set up authentication.");
-                            exit(1);
-                        }
+                Ok(config) => match (config.github_username, config.github_token) {
+                    (Some(username), Some(token)) => Some((username, token)),
+                    _ => {
+                        spinner.finish_and_clear();
+                        println!("No GitHub credentials found. Run 'cargo faasta login' to set up authentication.");
+                        exit(1);
                     }
-                }
+                },
                 Err(e) => {
                     spinner.finish_and_clear();
                     eprintln!("Failed to load config: {}", e);
                     exit(1);
                 }
             };
-            
+
             // Get GitHub credentials
             let (github_username, github_token) = github_config.unwrap();
 
@@ -655,8 +653,8 @@ async fn main() {
                 eprintln!("Error fetching metrics: {}", e);
                 exit(1);
             }
-        },
-        
+        }
+
         Commands::Unpublish(args) => {
             let spinner = indicatif::ProgressBar::new_spinner();
             spinner.set_message(format!("Unpublishing function '{}'...", args.name));
@@ -664,23 +662,21 @@ async fn main() {
 
             // Load GitHub config for authentication
             let github_config = match load_config() {
-                Ok(config) => {
-                    match (config.github_username, config.github_token) {
-                        (Some(username), Some(token)) => Some((username, token)),
-                        _ => {
-                            spinner.finish_and_clear();
-                            println!("No GitHub credentials found. Run 'cargo faasta login' to set up authentication.");
-                            exit(1);
-                        }
+                Ok(config) => match (config.github_username, config.github_token) {
+                    (Some(username), Some(token)) => Some((username, token)),
+                    _ => {
+                        spinner.finish_and_clear();
+                        println!("No GitHub credentials found. Run 'cargo faasta login' to set up authentication.");
+                        exit(1);
                     }
-                }
+                },
                 Err(e) => {
                     spinner.finish_and_clear();
                     eprintln!("Failed to load config: {}", e);
                     exit(1);
                 }
             };
-            
+
             // Get GitHub credentials
             let (github_username, github_token) = github_config.unwrap();
 
@@ -696,7 +692,7 @@ async fn main() {
 
             // Create auth token (username:token format)
             let auth_token = format!("{}:{}", github_username, github_token);
-            
+
             // Call the unpublish RPC
             match client
                 .unpublish(tarpc::context::current(), args.name.clone(), auth_token)
@@ -705,26 +701,28 @@ async fn main() {
                 Ok(Ok(_)) => {
                     spinner.finish_and_clear();
                     println!("✅ Function '{}' unpublished successfully", args.name);
-                },
+                }
                 Ok(Err(e)) => {
                     spinner.finish_and_clear();
                     match e {
-                        faasta_interface::FunctionError::NotFound(_) => 
-                            eprintln!("Error: Function '{}' not found", args.name),
-                        faasta_interface::FunctionError::PermissionDenied(_) =>
-                            eprintln!("Error: You don't have permission to unpublish this function"),
+                        faasta_interface::FunctionError::NotFound(_) => {
+                            eprintln!("Error: Function '{}' not found", args.name)
+                        }
+                        faasta_interface::FunctionError::PermissionDenied(_) => {
+                            eprintln!("Error: You don't have permission to unpublish this function")
+                        }
                         _ => eprintln!("Server error: {:?}", e),
                     }
                     exit(1);
-                },
+                }
                 Err(e) => {
                     spinner.finish_and_clear();
                     eprintln!("Communication error: {}", e);
                     exit(1);
                 }
             }
-        },
-        
+        }
+
         Commands::List(args) => {
             let spinner = indicatif::ProgressBar::new_spinner();
             spinner.set_message("Fetching function list...");
@@ -732,23 +730,21 @@ async fn main() {
 
             // Load GitHub config for authentication
             let github_config = match load_config() {
-                Ok(config) => {
-                    match (config.github_username, config.github_token) {
-                        (Some(username), Some(token)) => Some((username, token)),
-                        _ => {
-                            spinner.finish_and_clear();
-                            println!("No GitHub credentials found. Run 'cargo faasta login' to set up authentication.");
-                            exit(1);
-                        }
+                Ok(config) => match (config.github_username, config.github_token) {
+                    (Some(username), Some(token)) => Some((username, token)),
+                    _ => {
+                        spinner.finish_and_clear();
+                        println!("No GitHub credentials found. Run 'cargo faasta login' to set up authentication.");
+                        exit(1);
                     }
-                }
+                },
                 Err(e) => {
                     spinner.finish_and_clear();
                     eprintln!("Failed to load config: {}", e);
                     exit(1);
                 }
             };
-            
+
             // Get GitHub credentials
             let (github_username, github_token) = github_config.unwrap();
 
@@ -768,9 +764,7 @@ async fn main() {
                 eprintln!("Error listing functions: {}", e);
                 exit(1);
             }
-        },
-
-
+        }
 
         Commands::Run(run_args) => {
             // Call the run module handler
@@ -997,18 +991,21 @@ async fn get_metrics(
 ) -> anyhow::Result<()> {
     // Create auth token (username:token format)
     let auth_token = format!("{}:{}", username, token);
-    
+
     println!("Fetching metrics from server...");
-    
+
     // Call the get_metrics RPC
-    match client.get_metrics(tarpc::context::current(), auth_token).await {
+    match client
+        .get_metrics(tarpc::context::current(), auth_token)
+        .await
+    {
         Ok(Ok(metrics)) => {
             // Print summary
             println!("\n╔══════════════════════════════════════════════════════");
             println!("║ FAASTA FUNCTION METRICS");
             println!("╠══════════════════════════════════════════════════════");
             println!("║ Total Function Calls: {}", metrics.total_calls);
-            
+
             // Format total execution time nicely
             let total_time = if metrics.total_time > 60000 {
                 format!("{:.2} minutes", metrics.total_time as f64 / 60000.0)
@@ -1017,26 +1014,26 @@ async fn get_metrics(
             } else {
                 format!("{} ms", metrics.total_time)
             };
-            
+
             println!("║ Total Execution Time: {}", total_time);
             println!("║ Functions Deployed: {}", metrics.function_metrics.len());
             println!("╠══════════════════════════════════════════════════════");
-            
+
             // If we have no functions, show a message
             if metrics.function_metrics.is_empty() {
                 println!("║ No function metrics available.");
                 println!("╚══════════════════════════════════════════════════════");
                 return Ok(());
             }
-            
+
             // Print detailed metrics for each function
             println!("║ FUNCTION DETAILS");
             println!("╠══════════════════════════════════════════════════════");
-            
+
             for function in metrics.function_metrics {
                 println!("║ Function: {}", function.function_name);
                 println!("║ ├─ Call Count: {}", function.call_count);
-                
+
                 // Format execution time nicely
                 let exec_time = if function.total_time_millis > 60000 {
                     format!("{:.2} minutes", function.total_time_millis as f64 / 60000.0)
@@ -1045,27 +1042,30 @@ async fn get_metrics(
                 } else {
                     format!("{} ms", function.total_time_millis)
                 };
-                
+
                 println!("║ ├─ Total Execution Time: {}", exec_time);
-                
+
                 // Format average time per call
                 let avg_time = if function.call_count > 0 {
-                    format!("{:.2} ms", function.total_time_millis as f64 / function.call_count as f64)
+                    format!(
+                        "{:.2} ms",
+                        function.total_time_millis as f64 / function.call_count as f64
+                    )
                 } else {
                     "N/A".to_string()
                 };
-                
+
                 println!("║ ├─ Average Time per Call: {}", avg_time);
                 println!("║ └─ Last Called: {}", function.last_called);
                 println!("╟──────────────────────────────────────────────────────");
             }
             println!("╚══════════════════════════════════════════════════════");
             Ok(())
-        },
+        }
         Ok(Err(e)) => {
             eprintln!("Server error: {:?}", e);
             Err(anyhow::anyhow!("Server error: {:?}", e))
-        },
+        }
         Err(e) => Err(anyhow::anyhow!("Communication error: {}", e)),
     }
 }
@@ -1078,11 +1078,14 @@ async fn list_functions(
 ) -> anyhow::Result<()> {
     // Create auth token (username:token format)
     let auth_token = format!("{}:{}", username, token);
-    
+
     println!("Fetching functions for GitHub user: {}...", username);
-    
+
     // Call the list_functions RPC
-    match client.list_functions(tarpc::context::current(), auth_token).await {
+    match client
+        .list_functions(tarpc::context::current(), auth_token)
+        .await
+    {
         Ok(Ok(functions)) => {
             if functions.is_empty() {
                 println!("\nNo functions deployed under this GitHub account.");
@@ -1096,28 +1099,28 @@ async fn list_functions(
             println!("╠══════════════════════════════════════════════════════");
             println!("║ Total Functions: {}", functions.len());
             println!("╠══════════════════════════════════════════════════════");
-            
+
             // Print functions in alphabetical order
             let mut sorted_functions = functions.clone();
             sorted_functions.sort_by(|a, b| a.name.cmp(&b.name));
-            
+
             for function in sorted_functions {
                 println!("║ Function: {}", function.name);
-                
+
                 // Parse the published_at date for pretty formatting
                 println!("║ ├─ Published: {}", function.published_at);
-                
+
                 // URL
                 println!("║ ├─ URL: {}", function.usage);
-                
+
                 // Add a command to invoke it
                 println!("║ └─ Invoke: cargo faasta invoke {}", function.name);
                 println!("╟──────────────────────────────────────────────────────");
             }
             println!("╚══════════════════════════════════════════════════════");
-            
+
             Ok(())
-        },
+        }
         Ok(Err(e)) => Err(anyhow::anyhow!("Server error: {:?}", e)),
         Err(e) => Err(anyhow::anyhow!("Communication error: {}", e)),
     }

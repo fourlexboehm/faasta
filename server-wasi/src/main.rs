@@ -277,7 +277,6 @@ struct Args {
     /// Path to the functions directory
     #[arg(long, env = "FUNCTIONS_PATH", default_value = "./functions")]
     functions_path: PathBuf,
-
 }
 
 async fn load_tls_config(args: &Args) -> Result<Arc<ServerConfig>> {

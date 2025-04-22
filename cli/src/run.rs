@@ -60,20 +60,26 @@ pub async fn connect_to_function_service(server_addr: &str) -> Result<FunctionSe
                             addr
                         } else {
                             return Err(anyhow!(
-                                "Could not resolve hostname: {}. No addresses found.", 
+                                "Could not resolve hostname: {}. No addresses found.",
                                 hostname
                             ));
                         }
                     }
                     Err(e) => {
-                        return Err(anyhow!("Could not resolve hostname: {}. Error: {}", hostname, e));
+                        return Err(anyhow!(
+                            "Could not resolve hostname: {}. Error: {}",
+                            hostname,
+                            e
+                        ));
                     }
                 }
             }
         }
     };
 
-    let server_name = if server_addr.starts_with("localhost:") || server_addr.contains("localhost.localdomain:") {
+    let server_name = if server_addr.starts_with("localhost:")
+        || server_addr.contains("localhost.localdomain:")
+    {
         "localhost".to_string()
     } else {
         // Extract the hostname from the original server_addr string for SNI
@@ -100,7 +106,9 @@ pub async fn connect_to_function_service(server_addr: &str) -> Result<FunctionSe
         })?;
 
     // Open bidirectional stream
-    let stream = connection.open_bidirectional_stream().await 
+    let stream = connection
+        .open_bidirectional_stream()
+        .await
         .map_err(|e| anyhow!("Failed to open stream: {}", e))?;
     debug!("Opened bidirectional stream to function service");
 

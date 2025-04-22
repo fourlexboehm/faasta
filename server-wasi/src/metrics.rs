@@ -79,16 +79,22 @@ impl FunctionMetric {
             self.call_count.load(Ordering::Relaxed),
             self.total_time.load(Ordering::Relaxed)
         );
-        
+
         // No immediate persistence; metrics will be flushed periodically
     }
-    
+
     // Method to flush this individual function's metrics to the database
     pub fn flush_to_db(&self) {
         // Load existing DB values
-        let existing = METRICS_DB.get(self.function_name.as_bytes()).unwrap_or(None);
+        let existing = METRICS_DB
+            .get(self.function_name.as_bytes())
+            .unwrap_or(None);
         let (db_total, db_calls, db_last) = if let Some(db_bytes) = existing {
-            if let Ok(((t, c, l), _)) = bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(&db_bytes, bincode::config::standard()) {
+            if let Ok(((t, c, l), _)) = bincode::decode_from_slice::<
+                (u64, u64, u64),
+                bincode::config::Configuration,
+            >(&db_bytes, bincode::config::standard())
+            {
                 (t, c, l)
             } else {
                 (0, 0, 0)
@@ -96,14 +102,21 @@ impl FunctionMetric {
         } else {
             (0, 0, 0)
         };
-        
+
         // Add current in-memory values
         let mem_total = self.total_time.load(Ordering::Relaxed);
         let mem_calls = self.call_count.load(Ordering::Relaxed);
         let mem_last = self.last_called.load(Ordering::Relaxed);
-        
+
         // Combine and persist
-        if let Ok(data) = bincode::encode_to_vec((db_total + mem_total, db_calls + mem_calls, std::cmp::max(db_last, mem_last)), bincode::config::standard()) {
+        if let Ok(data) = bincode::encode_to_vec(
+            (
+                db_total + mem_total,
+                db_calls + mem_calls,
+                std::cmp::max(db_last, mem_last),
+            ),
+            bincode::config::standard(),
+        ) {
             let _ = METRICS_DB.insert(self.function_name.as_bytes(), data);
         }
     }
@@ -184,23 +197,30 @@ pub fn get_metrics() -> Metrics {
 pub fn get_or_create_metric(function_name: &str) -> FunctionMetric {
     // Check if function exists in memory cache
     let is_new_function = !FUNCTION_METRICS.contains_key(function_name);
-    
+
     if is_new_function {
         // Create the new metric
         let metric = FunctionMetric::new(function_name.to_string());
         FUNCTION_METRICS.insert(function_name.to_string(), metric);
-        
+
         // New function added - ensure it's recorded in Sled DB even if no calls happen
         // This is important for tracking deployed functions even before any calls
-        if !METRICS_DB.contains_key(function_name.as_bytes()).unwrap_or(false) {
+        if !METRICS_DB
+            .contains_key(function_name.as_bytes())
+            .unwrap_or(false)
+        {
             // Initialize with zeros
-            let initial_data = match bincode::encode_to_vec((0u64, 0u64, 0u64), bincode::config::standard()) {
-                Ok(data) => data,
-                Err(e) => {
-                    error!("Failed to encode initial metrics for new function {}: {}", function_name, e);
-                    return FunctionMetric::new(function_name.to_string());
-                }
-            };
+            let initial_data =
+                match bincode::encode_to_vec((0u64, 0u64, 0u64), bincode::config::standard()) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        error!(
+                            "Failed to encode initial metrics for new function {}: {}",
+                            function_name, e
+                        );
+                        return FunctionMetric::new(function_name.to_string());
+                    }
+                };
             let _ = METRICS_DB.insert(function_name.as_bytes(), initial_data);
             debug!("Added new function '{}' to metrics database", function_name);
         }
@@ -240,7 +260,7 @@ impl Drop for Timer {
 pub fn flush_metrics_to_db() {
     info!("Flushing metrics to database...");
     let mut flushed_count = 0;
-    
+
     for entry in FUNCTION_METRICS.iter() {
         let metric = entry.value(); // We only need the metric, not the key
 
@@ -248,35 +268,36 @@ pub fn flush_metrics_to_db() {
         if metric.call_count.load(Ordering::Relaxed) == 0 {
             continue; // Skip if no calls were made
         }
-        
+
         // First flush this function's current metrics to the database
         // using our helper method
         metric.flush_to_db();
-        
+
         // Then reset the in-memory counters
         metric.total_time.store(0, Ordering::Relaxed);
         metric.call_count.store(0, Ordering::Relaxed);
-        
+
         // Don't reset last_called timestamp
         // This preserves when the function was last used even after resetting counters
-        
+
         flushed_count += 1;
     }
-    
+
     if flushed_count > 0 {
         // Ensure DB writes are durable
         if let Err(e) = METRICS_DB.flush() {
             error!("Failed to flush metrics DB: {}", e);
         } else {
-            info!("Successfully flushed metrics for {} functions", flushed_count);
+            info!(
+                "Successfully flushed metrics for {} functions",
+                flushed_count
+            );
         }
-    }
-    else {
+    } else {
         // Log when no metrics were flushed (for monitoring)
         debug!("No metrics to flush - no functions were called since last flush");
     }
 }
-
 
 /// Spawn a Tokio task to periodically flush metrics to DB every `interval_secs` seconds.
 pub fn spawn_periodic_flush(interval_secs: u64) {
