@@ -1,3 +1,5 @@
+#![warn(unused_extern_crates)]
+
 use anyhow::{anyhow, bail, Context, Result};
 use bytes::Bytes;
 use clap::Parser;
@@ -130,11 +132,11 @@ impl MyServer {
             }
 
             debug!("Processing request for function: {}", subdomain);
-            
+
             // Use direct function name approach
             let wasm_filename = format!("{}.wasm", subdomain);
             debug!("Looking for WASM file: {}", wasm_filename);
-            
+
             // Create a timer for this function call
             let _timer = Timer::new(subdomain.to_string());
             let function_path = self.functions_dir.join(wasm_filename);

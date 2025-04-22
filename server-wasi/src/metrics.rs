@@ -1,11 +1,11 @@
 use dashmap::DashMap;
 use faasta_interface::{FunctionMetricsResponse, Metrics};
 use once_cell::sync::Lazy;
+use std::path::Path;
 use std::str;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::time::{interval, Duration as TokioDuration}; 
+use tokio::time::{interval, Duration as TokioDuration};
 use tracing::{debug, error, info};
 
 // Global metrics storage using DashMap for concurrent access
@@ -126,11 +126,12 @@ impl FunctionMetric {
 // Function to check if a function's WASM file exists
 fn function_wasm_exists(function_name: &str) -> bool {
     // Get the functions directory from environment or use default
-    let functions_dir = std::env::var("FUNCTIONS_PATH").unwrap_or_else(|_| "./functions".to_string());
-    
+    let functions_dir =
+        std::env::var("FUNCTIONS_PATH").unwrap_or_else(|_| "./functions".to_string());
+
     let wasm_filename = format!("{}.wasm", function_name);
     let wasm_path = Path::new(&functions_dir).join(&wasm_filename);
-    
+
     wasm_path.exists()
 }
 
@@ -211,7 +212,7 @@ pub fn get_or_create_metric(function_name: &str) -> Option<FunctionMetric> {
     if is_new_function {
         // First check if the function's WASM file exists
         if !function_wasm_exists(function_name) {
-            return None
+            return None;
         }
         // Create the new metric
         let metric = FunctionMetric::new(function_name.to_string());
@@ -267,7 +268,6 @@ impl Drop for Timer {
 
         if let Some(metric) = get_or_create_metric(&self.function_name) {
             metric.record_call(duration.as_millis() as u64);
-
         }
     }
 }

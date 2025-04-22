@@ -1,3 +1,4 @@
+#![warn(unused_extern_crates)]
 mod github_oauth;
 mod init;
 mod run;
@@ -215,7 +216,7 @@ async fn main() {
                 // Auto-detect based on package name
                 let rust_compiled_name = package_name.replace('-', "_");
                 let wasm_filename = format!("{}.wasm", rust_compiled_name);
-                
+
                 // Path to the compiled WASM file (uses Rust's converted name)
                 target_directory
                     .join("wasm32-wasip2")
@@ -277,11 +278,14 @@ async fn main() {
                     // Check WASM file size client-side as well (30MB max)
                     if data.len() > faasta_interface::MAX_WASM_SIZE {
                         spinner.finish_and_clear();
-                        eprintln!("Error: WASM file too large ({}MB). Maximum allowed size is 30MB.", data.len() / 1024 / 1024);
+                        eprintln!(
+                            "Error: WASM file too large ({}MB). Maximum allowed size is 30MB.",
+                            data.len() / 1024 / 1024
+                        );
                         exit(1);
                     }
                     data
-                },
+                }
                 Err(e) => {
                     spinner.finish_and_clear();
                     eprintln!("Failed to read WASM file: {}", e);
@@ -297,7 +301,6 @@ async fn main() {
                 eprintln!("GitHub credentials required for function upload.");
                 exit(1);
             };
-
 
             // Connect to the function service
             let server_addr = &args.server;
@@ -512,7 +515,7 @@ async fn main() {
                     // Auto-detect based on package name
                     let rust_compiled_name = package_name.replace('-', "_");
                     let wasm_filename = format!("{}.wasm", rust_compiled_name);
-                    
+
                     // Path to the compiled WASM file (uses Rust's converted name)
                     target_directory
                         .join("wasm32-wasip2")
@@ -522,24 +525,27 @@ async fn main() {
 
                 // For explicit WASM paths, we'll use the filename without extension as the function name
                 // unless the user specified a function name
-                let function_name = if build_args.wasm_path.is_some() && build_args.function_name.is_some() {
-                    // User provided both WASM path and function name - use the explicit function name
-                    build_args.function_name.clone().unwrap()
-                } else if build_args.wasm_path.is_some() {
-                    // User provided WASM path but no function name - derive from filename
-                    wasm_path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .map(|s| s.to_owned())
-                        .unwrap_or_else(|| {
-                            spinner.finish_and_clear();
-                            eprintln!("Error: Could not determine function name from WASM filename");
-                            exit(1);
-                        })
-                } else {
-                    // Standard flow - use the package name
-                    package_name.clone()
-                };
+                let function_name =
+                    if build_args.wasm_path.is_some() && build_args.function_name.is_some() {
+                        // User provided both WASM path and function name - use the explicit function name
+                        build_args.function_name.clone().unwrap()
+                    } else if build_args.wasm_path.is_some() {
+                        // User provided WASM path but no function name - derive from filename
+                        wasm_path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .map(|s| s.to_owned())
+                            .unwrap_or_else(|| {
+                                spinner.finish_and_clear();
+                                eprintln!(
+                                    "Error: Could not determine function name from WASM filename"
+                                );
+                                exit(1);
+                            })
+                    } else {
+                        // Standard flow - use the package name
+                        package_name.clone()
+                    };
 
                 if !wasm_path.exists() {
                     spinner.finish_and_clear();
@@ -558,7 +564,9 @@ async fn main() {
                         eprintln!("  2. Specify an explicit WASM file path with --wasm-path");
                         eprintln!();
                         eprintln!("If your WASM file is in a non-standard location or has a different name, use:");
-                        eprintln!("  cargo faasta build --deploy --wasm-path PATH/TO/YOUR/FILE.wasm");
+                        eprintln!(
+                            "  cargo faasta build --deploy --wasm-path PATH/TO/YOUR/FILE.wasm"
+                        );
                     }
                     exit(1);
                 }
@@ -569,11 +577,14 @@ async fn main() {
                         // Check WASM file size client-side as well (30MB max)
                         if data.len() > faasta_interface::MAX_WASM_SIZE {
                             spinner.finish_and_clear();
-                            eprintln!("Error: WASM file too large ({}MB). Maximum allowed size is 30MB.", data.len() / 1024 / 1024);
+                            eprintln!(
+                                "Error: WASM file too large ({}MB). Maximum allowed size is 30MB.",
+                                data.len() / 1024 / 1024
+                            );
                             exit(1);
                         }
                         data
-                    },
+                    }
                     Err(e) => {
                         spinner.finish_and_clear();
                         eprintln!("Failed to read WASM file: {}", e);
@@ -947,15 +958,15 @@ struct DeployArgs {
     /// Skip GitHub authentication
     #[arg(long)]
     skip_auth: bool,
-    
+
     /// Explicit path to WASM file (overrides automatic detection)
     #[arg(long)]
     wasm_path: Option<String>,
-    
+
     /// Function name to use (if different from package name)
     #[arg(long)]
     function_name: Option<String>,
-    
+
     /// Server address to deploy to (e.g., "faasta.xyz:4433")
     #[arg(long, default_value = "faasta.xyz:4433")]
     server: String,
@@ -966,11 +977,11 @@ struct BuildArgs {
     /// Deploy the function after building
     #[arg(short, long)]
     deploy: bool,
-    
+
     /// Explicit path to WASM file (overrides automatic detection)
     #[arg(long)]
     wasm_path: Option<String>,
-    
+
     /// Function name to use (if different from package name)
     #[arg(long)]
     function_name: Option<String>,

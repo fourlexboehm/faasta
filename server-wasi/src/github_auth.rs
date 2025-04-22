@@ -129,12 +129,4 @@ impl GitHubAuth {
 
         Ok(())
     }
-
-    /// Verify that a user owns a function using the stored HMAC
-    pub fn verify_function_ownership(&self, username: &str, function_name: &str) -> bool {
-        if let Some(user_data) = self.user_projects.get(username) {
-            return user_data.projects.contains(&function_name.to_string());
-        }
-        false
-    }
 }

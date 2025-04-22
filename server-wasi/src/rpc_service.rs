@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, error};
 
-
 /// Sled tree name for function metadata
 const FUNCTIONS_DB_TREE: &str = "functions";
 
@@ -185,19 +184,20 @@ impl FunctionService for FunctionServiceImpl {
         // Check if function name is valid
         if name.is_empty()
             || !name
-                .chars() 
-                .all(|c| c.is_alphanumeric() || c == '_' || c == '-') 
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
         {
             return Err(FunctionError::InvalidInput(
                 "Invalid function name. Use only alphanumeric characters, underscores, and hyphens.".to_string()
             ));
         }
-        
+
         // Check WASM file size
         if wasm_file.len() > faasta_interface::MAX_WASM_SIZE {
-            return Err(FunctionError::InvalidInput(
-                format!("WASM file too large. Maximum allowed size is 30MB, but received {} bytes", wasm_file.len())
-            ));
+            return Err(FunctionError::InvalidInput(format!(
+                "WASM file too large. Maximum allowed size is 30MB, but received {} bytes",
+                wasm_file.len()
+            )));
         }
 
         // Simple direct approach: use the exact function name for the WASM file
@@ -220,7 +220,7 @@ impl FunctionService for FunctionServiceImpl {
                 // Still enforce ownership check through GitHub auth
                 return Err(FunctionError::PermissionDenied(
                     "A function with this name already exists. Please choose a different name."
-                    .to_string(),
+                        .to_string(),
                 ));
             }
         } else {
