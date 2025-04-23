@@ -1,0 +1,19 @@
+[package]
+name = "http-rust"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1"
+http = "1"
+spin-sdk = "3"
+
+# reduce wasm binary size
+[profile.release]
+lto = true
+strip = "symbols"
+
+[workspace]

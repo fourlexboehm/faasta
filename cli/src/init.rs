@@ -10,8 +10,8 @@ pub struct NewArgs {
     pub package_name: String,
 }
 
-pub const HTTP_CARGO_TOML: &str = include_str!("../../function/Cargo.toml");
-pub const HTTP_LIB_RS: &str = include_str!("../../function/src/lib.rs");
+pub const HTTP_CARGO_TOML: &str = include_str!("../template/notCargo.toml");
+pub const HTTP_LIB_RS: &str = include_str!("../template/lib.rs");
 pub fn handle_new(args: &NewArgs) -> Result<(), Box<dyn Error>> {
     dbg!(&args);
     let current_dir = env::current_dir()?;
