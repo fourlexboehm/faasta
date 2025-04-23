@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CONFIG_FILE","USER_AGENT"],"struct":["AuthConfig","GitHubAuth"]};

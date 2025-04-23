@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["CLAP_STYLING","CONFIG_DIR","CONFIG_FILE","INVOKE_URL","MAX_PROJECTS_PER_USER"],"enum":["Commands","CustomError","Faasta"],"fn":["format_function_url","get_config_dir","get_metrics","invoke_function","is_ip_address","list_functions","load_config","main","same_file_path","save_config"],"mod":["github_oauth","init","run"],"struct":["BuildArgs","Cli","DeployArgs","FaastaConfig","InvokeArgs","LoginArgs","NewArgs","RunArgs","ServerArgs","UnpublishArgs"]};
+window.SIDEBAR_ITEMS = {"mod":["auth","github_oauth","init","run"]};
