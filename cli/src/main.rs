@@ -96,8 +96,8 @@ fn save_config(config: &FaastaConfig) -> Result<(), Error> {
     Ok(())
 }
 
-use clap::{Args, Parser, Subcommand};
 use crate::init::NewArgs;
+use clap::{Args, Parser, Subcommand};
 
 /// Main entry point
 #[tokio::main]
@@ -890,7 +890,6 @@ async fn main() {
         }
     }
 }
-
 
 #[derive(Args, Debug)]
 pub struct LoginArgs {
