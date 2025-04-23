@@ -1,5 +1,6 @@
 use crate::github_auth::GitHubAuth;
 use crate::metrics::get_metrics;
+use crate::SERVER;
 use dashmap::DashMap;
 use faasta_interface::{FunctionError, FunctionInfo, FunctionResult, FunctionService, Metrics};
 use std::fs;
@@ -12,6 +13,9 @@ use tracing::{debug, error};
 const FUNCTIONS_DB_TREE: &str = "functions";
 
 /// Implementation of the FunctionService
+/// The FaastaServer struct is the one holding the pre_cache, but we need a way to
+/// clear cache entries when unpublishing functions.
+///
 #[derive(Clone)]
 pub struct FunctionServiceImpl {
     functions_dir: PathBuf,
@@ -243,6 +247,11 @@ impl FunctionService for FunctionServiceImpl {
             }
         }
 
+        // When publishing a new version, clear any existing cache entry
+        if let Some(server) = SERVER.get() {
+            server.remove_from_cache(&name);
+        }
+
         // Write the WASM file
         let mut file = fs::File::create(&wasm_path)
             .map_err(|e| FunctionError::InternalError(format!("Failed to create file: {}", e)))?;
@@ -363,8 +372,10 @@ impl FunctionService for FunctionServiceImpl {
             }
 
             // Remove metadata from sled
-            if let Err(e) = self.functions_tree.remove(name.as_bytes()) {
-                error!("Failed to remove function metadata for '{}': {}", name, e);
+            match self.functions_tree.remove(name.as_bytes()) {
+                Ok(_) => debug!("Successfully removed metadata for function '{}'", name),
+                Err(e) => error!("Failed to remove function metadata for '{}': {}", name, e),
+                // We don't return an error here because the function was already removed
             }
 
             Ok(())

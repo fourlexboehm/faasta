@@ -22,6 +22,7 @@ use tarpc::tokio_util::codec::LengthDelimitedCodec;
 // Removed unused imports from lers
 use dashmap::DashMap;
 use futures::prelude::*;
+use once_cell::sync::OnceCell;
 use rustls_pemfile::{certs, private_key};
 use std::fs::File;
 use std::io::BufReader;
@@ -42,6 +43,9 @@ use wasmtime_wasi_http::body::HyperOutgoingBody;
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 
+// Global server reference for cache management
+pub static SERVER: OnceCell<Arc<FaastaServer>> = OnceCell::new();
+
 // Create a basic response with string content
 fn text_response(status: u16, text: &str) -> Result<Response<HyperOutgoingBody>> {
     // Create a simple body with the provided text
@@ -59,7 +63,7 @@ fn text_response(status: u16, text: &str) -> Result<Response<HyperOutgoingBody>>
 }
 
 // Define the client state that holds ResourceTable, WasiCtx, and WasiHttpCtx
-struct MyClientState {
+struct FaastaClientState {
     table: ResourceTable,
     wasi: WasiCtx,
     http: WasiHttpCtx,
@@ -67,35 +71,35 @@ struct MyClientState {
     function_name: String,
 }
 
-impl wasmtime_wasi::IoView for MyClientState {
+impl wasmtime_wasi::IoView for FaastaClientState {
     fn table(&mut self) -> &mut ResourceTable {
         &mut self.table
     }
 }
 
-impl WasiView for MyClientState {
+impl WasiView for FaastaClientState {
     fn ctx(&mut self) -> &mut WasiCtx {
         &mut self.wasi
     }
 }
 
-impl WasiHttpView for MyClientState {
+impl WasiHttpView for FaastaClientState {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
     }
 }
 
 // Server state
-struct MyServer {
+pub struct FaastaServer {
     engine: Engine,
     metadata_db: sled::Db,
-    pre_cache: DashMap<String, ProxyPre<MyClientState>>,
+    pre_cache: DashMap<String, ProxyPre<FaastaClientState>>,
     base_domain: String,
     functions_dir: PathBuf,
     github_auth: Arc<GitHubAuth>,
 }
 
-impl MyServer {
+impl FaastaServer {
     async fn new(
         engine: Engine,
         metadata_db: sled::Db,
@@ -113,6 +117,14 @@ impl MyServer {
             functions_dir,
             github_auth,
         })
+    }
+
+    /// Remove a function from the pre_cache
+    pub fn remove_from_cache(&self, function_name: &str) {
+        if self.pre_cache.contains_key(function_name) {
+            self.pre_cache.remove(function_name);
+            debug!("Removed function '{}' from component cache", function_name);
+        }
     }
 
     async fn handle_request(&self, req: Request<Incoming>) -> Result<Response<HyperOutgoingBody>> {
@@ -152,7 +164,7 @@ impl MyServer {
             // Create store with client state
             let mut store = Store::new(
                 pre.engine(),
-                MyClientState {
+                FaastaClientState {
                     table: ResourceTable::new(),
                     wasi: WasiCtxBuilder::new()
                         .inherit_stdio()
@@ -205,7 +217,7 @@ impl MyServer {
         &self,
         function_name: &str,
         function_path: &PathBuf,
-    ) -> Result<ProxyPre<MyClientState>> {
+    ) -> Result<ProxyPre<FaastaClientState>> {
         // Check if we have this pre-cached
         if let Some(cached) = self.pre_cache.get(function_name) {
             return Ok(cached.value().clone());
@@ -308,7 +320,7 @@ async fn load_tls_config(args: &Args) -> Result<Arc<ServerConfig>> {
 // The obtain_certificate function was removed as it's now handled by the CertManager
 
 // Function to handle connections for tarpc
-async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<MyServer>) {
+async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<FaastaServer>) {
     while let Some(mut connection) = quic_server.accept().await {
         let server_clone = server.clone();
         tokio::spawn(async move {
@@ -415,8 +427,8 @@ async fn main() -> Result<()> {
     let engine = Engine::new(&config)?;
 
     // Create server
-    let server = Arc::new(
-        MyServer::new(
+    let server_instance = Arc::new(
+        FaastaServer::new(
             engine,
             pre_cache,
             args.base_domain.clone(),
@@ -424,6 +436,10 @@ async fn main() -> Result<()> {
         )
         .await?,
     );
+
+    // Store server in global OnceCell for cache management
+    let _ = SERVER.set(server_instance.clone());
+
     // Spawn a background task to flush metrics to DB every hour
     metrics::spawn_periodic_flush(60 * 60);
 
@@ -439,7 +455,7 @@ async fn main() -> Result<()> {
     info!("Listening on https://{}", args.listen_addr);
 
     // Start tarpc service for function management
-    let server_clone = server.clone();
+    let server_clone = server_instance.clone();
     tokio::spawn(async move {
         let addr = "0.0.0.0:4433".parse::<std::net::SocketAddr>().unwrap();
 
@@ -476,7 +492,7 @@ async fn main() -> Result<()> {
         info!("Accepted connection from {}", peer_addr);
 
         // Clone server and acceptor for this connection
-        let server = server.clone();
+        let server = server_instance.clone();
         let tls_acceptor = tls_acceptor.clone();
 
         // Handle connection in a new task

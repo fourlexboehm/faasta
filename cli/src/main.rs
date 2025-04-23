@@ -97,6 +97,7 @@ fn save_config(config: &FaastaConfig) -> Result<(), Error> {
 }
 
 use clap::{Args, Parser, Subcommand};
+use crate::init::NewArgs;
 
 /// Main entry point
 #[tokio::main]
@@ -890,11 +891,6 @@ async fn main() {
     }
 }
 
-#[derive(Args, Debug)]
-pub struct NewArgs {
-    /// The name of the package to create
-    package_name: String,
-}
 
 #[derive(Args, Debug)]
 pub struct LoginArgs {

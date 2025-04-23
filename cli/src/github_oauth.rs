@@ -21,6 +21,14 @@ static TEST_MODE: AtomicBool = AtomicBool::new(false);
 static TEST_USERNAME: Mutex<Option<String>> = Mutex::new(None);
 static TEST_TOKEN: Mutex<Option<String>> = Mutex::new(None);
 
+#[cfg(test)]
+/// Enable test mode with given username and token.
+pub fn enable_test_mode(username: String, token: String) {
+    TEST_MODE.store(true, Ordering::Relaxed);
+    *TEST_USERNAME.lock().unwrap() = Some(username);
+    *TEST_TOKEN.lock().unwrap() = Some(token);
+}
+
 /// Get the test mode status and credentials
 fn get_test_data() -> (bool, Option<String>, Option<String>) {
     (

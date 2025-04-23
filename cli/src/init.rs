@@ -1,7 +1,14 @@
-use crate::NewArgs;
+use clap::Args;
 use std::error::Error;
 use std::path::Path;
 use std::{env, fs, io};
+
+/// CLI arguments for the `init` command
+#[derive(Args, Debug)]
+pub struct NewArgs {
+    /// The name of the package to create
+    pub package_name: String,
+}
 
 pub const HTTP_CARGO_TOML: &str = include_str!("../../function/Cargo.toml");
 pub const HTTP_LIB_RS: &str = include_str!("../../function/src/lib.rs");

@@ -2,6 +2,7 @@ use anyhow::Error;
 use dirs::config_dir;
 use github_app_auth::{GithubAuthParams, InstallationAccessToken};
 use reqwest::header::HeaderMap;
+use reqwest::header::{HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -77,8 +78,17 @@ impl GitHubAuth {
         if self.token.is_none() {
             self.authenticate().await?;
         }
-        
-        self.token.as_mut().unwrap().header().await
+
+        // Retrieve the OAuth2 header map and convert to reqwest::header::HeaderMap
+        let oauth_headers = self.token.as_mut().unwrap().header().await?;
+        let mut headers = HeaderMap::new();
+        for (name, value) in oauth_headers.iter() {
+            // Convert header name and value into reqwest types
+            let hn = HeaderName::from_bytes(name.as_str().as_bytes())?;
+            let hv = HeaderValue::from_bytes(value.as_bytes())?;
+            headers.insert(hn, hv);
+        }
+        Ok(headers)
     }
     
     /// Store project HMAC for ownership verification
@@ -119,7 +129,14 @@ impl GitHubAuth {
     
     /// Get user ID from authenticated GitHub instance
     async fn fetch_and_store_user_id(&mut self) -> Result<(), Error> {
-        let header = self.token.as_mut().unwrap().header().await?;
+        // Retrieve the underlying OAuth2 headers and convert to reqwest HeaderMap
+        let oauth_headers = self.token.as_mut().unwrap().header().await?;
+        let mut header = HeaderMap::new();
+        for (name, value) in oauth_headers.iter() {
+            let hn = HeaderName::from_bytes(name.as_str().as_bytes())?;
+            let hv = HeaderValue::from_bytes(value.as_bytes())?;
+            header.insert(hn, hv);
+        }
         
         // Create authenticated client
         let client = reqwest::Client::new();
