@@ -146,7 +146,7 @@ impl FaastaServer {
     async fn handle_request(&self, req: Request<Incoming>) -> Result<Response<HyperOutgoingBody>> {
         // Extract function name from subdomain
         let host_header = req.headers().get(HOST).and_then(|h| h.to_str().ok());
-        
+
         // Check if it's the root domain
         if host_header.map_or(false, |h| h == self.base_domain) {
             return redirect_to_website();

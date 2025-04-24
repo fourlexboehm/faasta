@@ -267,7 +267,12 @@ impl Drop for Timer {
             .unwrap_or(Duration::from_secs(0));
 
         if let Some(metric) = get_or_create_metric(&self.function_name) {
-            metric.record_call(duration.as_millis() as u64);
+            // Round up any duration to at least 1 millisecond
+            let duration_ms = duration.as_millis() as u64;
+            // Ensure the minimum duration is 1ms, even if the actual duration was 0ms
+            let rounded_duration = std::cmp::max(duration_ms, 1);
+
+            metric.record_call(rounded_duration);
         }
     }
 }
