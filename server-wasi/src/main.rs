@@ -62,6 +62,22 @@ fn text_response(status: u16, text: &str) -> Result<Response<HyperOutgoingBody>>
         .body(HyperOutgoingBody::new(body))?)
 }
 
+// Create a redirect response to website.faasta.xyz
+fn redirect_to_website() -> Result<Response<HyperOutgoingBody>> {
+    // Create a simple body with a redirect message
+    let text_owned = "Redirecting to website.faasta.xyz...".to_string();
+    let body = Full::new(Bytes::from(text_owned))
+        .map_err(|_| ErrorCode::InternalError(None))
+        .boxed();
+
+    // Build and return the redirect response
+    Ok(Response::builder()
+        .status(302)
+        .header("Location", "https://website.faasta.xyz")
+        .header("Content-Type", "text/plain")
+        .body(HyperOutgoingBody::new(body))?)
+}
+
 // Define the client state that holds ResourceTable, WasiCtx, and WasiHttpCtx
 struct FaastaClientState {
     table: ResourceTable,
@@ -130,17 +146,22 @@ impl FaastaServer {
     async fn handle_request(&self, req: Request<Incoming>) -> Result<Response<HyperOutgoingBody>> {
         // Extract function name from subdomain
         let host_header = req.headers().get(HOST).and_then(|h| h.to_str().ok());
+        
+        // Check if it's the root domain
+        if host_header.map_or(false, |h| h == self.base_domain) {
+            return redirect_to_website();
+        }
 
         if let Some(host) = host_header {
             let expected_suffix = format!(".{}", self.base_domain);
 
             if !host.ends_with(&expected_suffix) {
-                return text_response(404, "Not Found");
+                return redirect_to_website();
             }
 
             let subdomain = host.trim_end_matches(&expected_suffix);
             if subdomain.is_empty() || subdomain == host {
-                return text_response(404, "Not Found");
+                return redirect_to_website();
             }
 
             debug!("Processing request for function: {}", subdomain);
@@ -153,7 +174,7 @@ impl FaastaServer {
             let _timer = Timer::new(subdomain.to_string());
             let function_path = self.functions_dir.join(wasm_filename);
             if !function_path.exists() {
-                return text_response(404, "Not Found");
+                return redirect_to_website();
             }
 
             // Get or load the ProxyPre
@@ -209,7 +230,8 @@ impl FaastaServer {
                 },
             }
         } else {
-            text_response(400, "Bad Request")
+            // No host header, redirect to website
+            redirect_to_website()
         }
     }
 
