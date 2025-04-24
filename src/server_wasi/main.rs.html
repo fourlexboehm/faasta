@@ -146,7 +146,7 @@
 <a href=#146 id=146 data-nosnippet>146</a>    <span class="kw">async fn </span>handle_request(<span class="kw-2">&amp;</span><span class="self">self</span>, req: Request&lt;Incoming&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;Response&lt;HyperOutgoingBody&gt;&gt; {
 <a href=#147 id=147 data-nosnippet>147</a>        <span class="comment">// Extract function name from subdomain
 <a href=#148 id=148 data-nosnippet>148</a>        </span><span class="kw">let </span>host_header = req.headers().get(HOST).and_then(|h| h.to_str().ok());
-<a href=#149 id=149 data-nosnippet>149</a>        
+<a href=#149 id=149 data-nosnippet>149</a>
 <a href=#150 id=150 data-nosnippet>150</a>        <span class="comment">// Check if it's the root domain
 <a href=#151 id=151 data-nosnippet>151</a>        </span><span class="kw">if </span>host_header.map_or(<span class="bool-val">false</span>, |h| h == <span class="self">self</span>.base_domain) {
 <a href=#152 id=152 data-nosnippet>152</a>            <span class="kw">return </span>redirect_to_website();
