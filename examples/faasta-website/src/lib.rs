@@ -79,7 +79,7 @@ fn serve_home_page() -> anyhow::Result<Response> {
                         div.feature {
                             div.feature-icon { "🌐" }
                             h3 { "Standards Compliant" }
-                            p { "Based on WASI P2 and WASIHTTP, making your functions portable across platforms." }
+                            p { "Based on WASI Preview 2 and wasi-http, making your functions portable across platforms." }
                         }
                     }
                 }
@@ -427,14 +427,14 @@ fn layout(title: &str, content: Markup) -> Markup {
                                 h3 { "Community" }
                                 ul {
                                     li { a href="#" { "Discord" } }
-                                    li { a href="#" { "Twitter" } }
+
                                     li { a href="#" { "Blog" } }
                                 }
                             }
                         }
                         div.footer-bottom {
                             p { "© 2025 Faasta Project. All rights reserved." }
-                            p { "Powered by WebAssembly and WASI P2." }
+                            p { "Powered by WebAssembly and WASI Preview 2." }
                         }
                     }
                 }

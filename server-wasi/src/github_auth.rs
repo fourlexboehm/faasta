@@ -34,11 +34,6 @@ impl GitHubAuth {
                     bincode::decode_from_slice::<UserData, _>(&item.1, bincode::config::standard())
                 {
                     user_projects.insert(username.to_string(), user_data);
-                } else {
-                    // Fallback to serde_json for backward compatibility
-                    if let Ok(user_data) = serde_json::from_slice::<UserData>(&item.1) {
-                        user_projects.insert(username.to_string(), user_data);
-                    }
                 }
             }
         }

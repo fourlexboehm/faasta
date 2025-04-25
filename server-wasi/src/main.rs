@@ -216,18 +216,24 @@ impl FaastaServer {
                 Ok::<_, anyhow::Error>(())
             });
 
-            // Wait for response
-            match receiver.await {
-                Ok(Ok(resp)) => Ok(resp),
-                Ok(Err(err_code)) => {
-                    error!("Function returned error: {:?}", err_code);
-                    Err(anyhow!("Function error: {:?}", err_code))
-                }
-                Err(_) => match task.await {
-                    Ok(Ok(())) => bail!("Function did not set response"),
-                    Ok(Err(e)) => Err(e),
-                    Err(e) => Err(e.into()),
+            // Wait for response with a 10-minute timeout
+            match tokio::time::timeout(std::time::Duration::from_secs(600), receiver).await {
+                Ok(receiver_result) => match receiver_result {
+                    Ok(Ok(resp)) => Ok(resp),
+                    Ok(Err(err_code)) => {
+                        error!("Function returned error: {:?}", err_code);
+                        Err(anyhow!("Function error: {:?}", err_code))
+                    }
+                    Err(_) => match task.await {
+                        Ok(Ok(())) => bail!("Function did not set response"),
+                        Ok(Err(e)) => Err(e),
+                        Err(e) => Err(e.into()),
+                    },
                 },
+                Err(_) => {
+                    error!("Function execution timed out after 10 minutes");
+                    Err(anyhow!("Function execution timed out after 10 minutes"))
+                }
             }
         } else {
             // No host header, redirect to website
