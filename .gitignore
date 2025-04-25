@@ -14,3 +14,4 @@ server/user_data*
 functions/function
 server-wasi/certs/cert.pem
 server-wasi/certs/key.pem
+server-wasi/data/*
