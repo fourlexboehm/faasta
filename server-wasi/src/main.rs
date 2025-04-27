@@ -42,6 +42,10 @@ use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::body::HyperOutgoingBody;
 use wasmtime_wasi_http::io::TokioIo;
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
+// Add Axum imports for HTTP redirection
+use axum::BoxError;
+use axum::{extract::Host, http::uri::Authority, response::Redirect, Router};
+use hyper::Uri;
 
 // Global server reference for cache management
 pub static SERVER: OnceCell<Arc<FaastaServer>> = OnceCell::new();
@@ -144,100 +148,201 @@ impl FaastaServer {
     }
 
     async fn handle_request(&self, req: Request<Incoming>) -> Result<Response<HyperOutgoingBody>> {
-        // Extract function name from subdomain
-        let host_header = req.headers().get(HOST).and_then(|h| h.to_str().ok());
+        // Extract function name from subdomain or path
+        let host_header = req
+            .headers()
+            .get(HOST)
+            .and_then(|h| h.to_str().ok())
+            .map(|s| s.to_string());
+        let path = req.uri().path().to_string();
 
-        // Check if it's the root domain
-        if host_header.map(|h| h == self.base_domain).unwrap_or(false) {
+        debug!("Handling request with path: {}", path);
+
+        // Check if it's the root domain or local development host
+        if host_header
+            .as_deref()
+            .map(|h| {
+                h == self.base_domain || h.starts_with("localhost") || h.starts_with("127.0.0.1")
+            })
+            .unwrap_or(false)
+        {
+            debug!("Processing request on root domain: {}", self.base_domain);
+            // Root domain with no subdomain - try to route based on path
+            let path_str = path.as_str();
+            let path_parts: Vec<&str> = path_str.split('/').collect();
+
+            if path_parts.len() >= 2 && !path_parts[1].is_empty() {
+                let function_name = path_parts[1].to_string();
+                debug!(
+                    "Processing path-based request for function: {}",
+                    function_name
+                );
+
+                // Use direct function name approach
+                let wasm_filename = format!("{}.wasm", function_name);
+                debug!("Looking for WASM file: {}", wasm_filename);
+
+                // Create a timer for this function call
+                let _timer = Timer::new(function_name.clone());
+                let function_path = self.functions_dir.join(&wasm_filename);
+
+                // Debug logging to track function path
+                if function_path.exists() {
+                    debug!("Found function at path: {:?}", function_path);
+                    // Create a new path to remove the /{function_name} prefix
+                    let new_path = if path_parts.len() > 2 {
+                        // Keep the rest of the path
+                        format!("/{}", path_parts[2..].join("/"))
+                    } else {
+                        // Just the root
+                        "/".to_string()
+                    };
+
+                    debug!("Rewriting path to: {}", new_path);
+
+                    // Build a new request with the modified path
+                    let mut builder = Request::builder()
+                        .method(req.method().clone())
+                        .uri(new_path)
+                        .version(req.version());
+
+                    // Copy all headers
+                    for (name, value) in req.headers() {
+                        builder = builder.header(name, value);
+                    }
+
+                    let (_, body) = req.into_parts();
+                    let new_req = builder.body(body)?;
+
+                    return self
+                        .execute_function(new_req, &function_name, &function_path)
+                        .await;
+                } else {
+                    debug!("Function not found at path: {:?}", function_path);
+                    // If we're looking for a specific function but it doesn't exist, return a 404
+                    return text_response(404, &format!("Function '{}' not found", function_name));
+                }
+            }
+
+            // No function found in path, redirect to website
+            debug!("No function specified in path, redirecting to website");
             return redirect_to_website();
         }
 
-        if let Some(host) = host_header {
+        if let Some(host) = &host_header {
             let expected_suffix = format!(".{}", self.base_domain);
+            debug!("Checking host: {} for subdomain routing", host);
 
-            if !host.ends_with(&expected_suffix) {
+            if !host
+                .to_lowercase()
+                .ends_with(&expected_suffix.to_lowercase())
+                && !host.starts_with("localhost")
+                && !host.starts_with("127.0.0.1")
+            {
+                debug!(
+                    "Host doesn't end with expected suffix: {} and is not a local development host",
+                    expected_suffix
+                );
                 return redirect_to_website();
             }
 
-            let subdomain = host.trim_end_matches(&expected_suffix);
-            if subdomain.is_empty() || subdomain == host {
+            let subdomain = host.trim_end_matches(&expected_suffix).to_string();
+            if subdomain.is_empty() || subdomain == *host {
+                debug!("Empty subdomain or hostname equals subdomain, redirecting");
                 return redirect_to_website();
             }
 
-            debug!("Processing request for function: {}", subdomain);
+            debug!("Processing subdomain request for function: {}", subdomain);
 
             // Use direct function name approach
             let wasm_filename = format!("{}.wasm", subdomain);
             debug!("Looking for WASM file: {}", wasm_filename);
 
             // Create a timer for this function call
-            let _timer = Timer::new(subdomain.to_string());
-            let function_path = self.functions_dir.join(wasm_filename);
+            let _timer = Timer::new(subdomain.clone());
+            let function_path = self.functions_dir.join(&wasm_filename);
             if !function_path.exists() {
-                return redirect_to_website();
+                debug!("Function not found at path: {:?}", function_path);
+                return text_response(404, &format!("Function '{}' not found", subdomain));
             }
 
-            // Get or load the ProxyPre
-            let pre = self
-                .get_or_load_proxy_pre(subdomain, &function_path)
-                .await?;
-
-            // Create store with client state
-            let mut store = Store::new(
-                pre.engine(),
-                FaastaClientState {
-                    table: ResourceTable::new(),
-                    wasi: WasiCtxBuilder::new()
-                        .inherit_stdio()
-                        .env("FUNCTION_NAME", subdomain)
-                        .build(),
-                    http: WasiHttpCtx::new(),
-                    function_name: subdomain.to_string(),
-                },
-            );
-
-            // Setup the response channel
-            let (sender, receiver) = tokio::sync::oneshot::channel();
-
-            // Create the WASI HTTP request
-            let wasi_req = store.data_mut().new_incoming_request(Scheme::Http, req)?;
-            let wasi_resp_out = store.data_mut().new_response_outparam(sender)?;
-
-            // Clone the pre so we can move it into the task
-            let pre_clone = pre.clone();
-
-            // Spawn task to execute the function
-            let task = tokio::task::spawn(async move {
-                let proxy = pre_clone.instantiate_async(&mut store).await?;
-                proxy
-                    .wasi_http_incoming_handler()
-                    .call_handle(store, wasi_req, wasi_resp_out)
-                    .await?;
-                Ok::<_, anyhow::Error>(())
-            });
-
-            // Wait for response with a 10-minute timeout
-            match tokio::time::timeout(std::time::Duration::from_secs(600), receiver).await {
-                Ok(receiver_result) => match receiver_result {
-                    Ok(Ok(resp)) => Ok(resp),
-                    Ok(Err(err_code)) => {
-                        error!("Function returned error: {:?}", err_code);
-                        Err(anyhow!("Function error: {:?}", err_code))
-                    }
-                    Err(_) => match task.await {
-                        Ok(Ok(())) => bail!("Function did not set response"),
-                        Ok(Err(e)) => Err(e),
-                        Err(e) => Err(e.into()),
-                    },
-                },
-                Err(_) => {
-                    error!("Function execution timed out after 10 minutes");
-                    Err(anyhow!("Function execution timed out after 10 minutes"))
-                }
-            }
+            // Execute the function
+            debug!("Executing function from subdomain route");
+            return self.execute_function(req, &subdomain, &function_path).await;
         } else {
             // No host header, redirect to website
+            debug!("No host header found, redirecting to website");
             redirect_to_website()
+        }
+    }
+
+    async fn execute_function(
+        &self,
+        req: Request<Incoming>,
+        function_name: &str,
+        function_path: &PathBuf,
+    ) -> Result<Response<HyperOutgoingBody>> {
+        debug!(
+            "Executing function: {} with path: {:?}",
+            function_name, function_path
+        );
+        // Get or load the ProxyPre
+        let pre = self
+            .get_or_load_proxy_pre(function_name, function_path)
+            .await?;
+
+        // Create store with client state
+        let mut store = Store::new(
+            pre.engine(),
+            FaastaClientState {
+                table: ResourceTable::new(),
+                wasi: WasiCtxBuilder::new()
+                    .inherit_stdio()
+                    .env("FUNCTION_NAME", function_name)
+                    .build(),
+                http: WasiHttpCtx::new(),
+                function_name: function_name.to_string(),
+            },
+        );
+
+        // Setup the response channel
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+
+        // Create the WASI HTTP request
+        let wasi_req = store.data_mut().new_incoming_request(Scheme::Http, req)?;
+        let wasi_resp_out = store.data_mut().new_response_outparam(sender)?;
+
+        // Clone the pre so we can move it into the task
+        let pre_clone = pre.clone();
+
+        // Spawn task to execute the function
+        let task = tokio::task::spawn(async move {
+            let proxy = pre_clone.instantiate_async(&mut store).await?;
+            proxy
+                .wasi_http_incoming_handler()
+                .call_handle(store, wasi_req, wasi_resp_out)
+                .await?;
+            Ok::<_, anyhow::Error>(())
+        });
+
+        // Wait for response with a 10-minute timeout
+        match tokio::time::timeout(std::time::Duration::from_secs(600), receiver).await {
+            Ok(receiver_result) => match receiver_result {
+                Ok(Ok(resp)) => Ok(resp),
+                Ok(Err(err_code)) => {
+                    error!("Function returned error: {:?}", err_code);
+                    Err(anyhow!("Function error: {:?}", err_code))
+                }
+                Err(_) => match task.await {
+                    Ok(Ok(())) => bail!("Function did not set response"),
+                    Ok(Err(e)) => Err(e),
+                    Err(e) => Err(e.into()),
+                },
+            },
+            Err(_) => {
+                error!("Function execution timed out after 10 minutes");
+                Err(anyhow!("Function execution timed out after 10 minutes"))
+            }
         }
     }
 
@@ -283,6 +388,10 @@ struct Args {
     /// Address to listen on (e.g., 0.0.0.0:443)
     #[arg(short, long, env = "LISTEN_ADDR", default_value = "0.0.0.0:443")]
     listen_addr: SocketAddr,
+
+    /// HTTP Address to listen on for redirects (e.g., 0.0.0.0:80)
+    #[arg(long, env = "HTTP_LISTEN_ADDR", default_value = "0.0.0.0:80")]
+    http_listen_addr: SocketAddr,
 
     /// Base domain for function subdomains
     #[arg(long, env = "BASE_DOMAIN", default_value = "faasta.xyz")]
@@ -345,8 +454,6 @@ async fn load_tls_config(args: &Args) -> Result<Arc<ServerConfig>> {
     Ok(Arc::new(config))
 }
 
-// The obtain_certificate function was removed as it's now handled by the CertManager
-
 // Function to handle connections for tarpc
 async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<FaastaServer>) {
     while let Some(mut connection) = quic_server.accept().await {
@@ -371,6 +478,7 @@ async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<FaastaServer>
                     .expect("Failed to create function service");
 
                     // Process this connection
+                    // Use default configuration but with a longer context deadline
                     let server_channel = BaseChannel::with_defaults(transport);
                     server_channel
                         .execute(service_clone.serve())
@@ -385,7 +493,65 @@ async fn run_server(mut quic_server: s2n_quic::Server, server: Arc<FaastaServer>
     }
 }
 
-// Removed unused spawn helper function
+// HTTP to HTTPS redirection using Axum framework
+async fn run_http_redirect_server(http_listener: TcpListener) {
+    info!("HTTP redirect server listening for connections");
+
+    // Create a function to convert HTTP URLs to HTTPS
+    let make_https = |host: &str, uri: Uri, https_port: u16| -> Result<Uri, BoxError> {
+        let mut parts = uri.into_parts();
+
+        parts.scheme = Some(axum::http::uri::Scheme::HTTPS);
+
+        if parts.path_and_query.is_none() {
+            parts.path_and_query = Some("/".parse().unwrap());
+        }
+
+        let authority: Authority = host.parse()?;
+        let bare_host = match authority.port() {
+            Some(port_struct) => authority
+                .as_str()
+                .strip_suffix(port_struct.as_str())
+                .unwrap()
+                .strip_suffix(':')
+                .unwrap(), // if authority.port() is Some(port) then we can be sure authority ends with :{port}
+            None => authority.as_str(),
+        };
+
+        parts.authority = Some(format!("{bare_host}:{https_port}").parse()?);
+
+        Ok(Uri::from_parts(parts)?)
+    };
+
+    // Get the local port this listener is bound to
+    let listener_addr = http_listener.local_addr().unwrap();
+
+    // Determine HTTPS port (default to 443)
+    let https_port = 443;
+
+    // Create the redirect handler
+    let redirect = move |Host(host): Host, uri: Uri| async move {
+        match make_https(&host, uri, https_port) {
+            Ok(uri) => Ok(Redirect::permanent(&uri.to_string())),
+            Err(error) => {
+                tracing::warn!(%error, "failed to convert URI to HTTPS");
+                Err(axum::http::StatusCode::BAD_REQUEST)
+            }
+        }
+    };
+
+    // Create Axum router with the redirect handler
+    let app = Router::new().fallback(redirect);
+
+    // Start the Axum HTTP server
+    info!(
+        "HTTP redirect service listening on http://{}",
+        listener_addr
+    );
+
+    // Serve with the existing TcpListener
+    axum::serve(http_listener, app).await.unwrap();
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -469,14 +635,26 @@ async fn main() -> Result<()> {
     let _ = SERVER.set(server_instance.clone());
 
     // Spawn a background task to flush metrics to DB every hour
-    metrics::spawn_periodic_flush(60 * 60);
+    metrics::spawn_periodic_flush(60 * 30);
 
     // Load TLS configuration
     let tls_config = load_tls_config(&args).await?;
 
     let tls_acceptor = TlsAcceptor::from(tls_config.clone());
 
-    // Start listening for connections
+    // Start listening for HTTP connections (for redirects)
+    let http_listener = TcpListener::bind(&args.http_listen_addr)
+        .await
+        .with_context(|| format!("Failed to bind to {}", args.http_listen_addr))?;
+    info!(
+        "HTTP redirect service listening on http://{}",
+        args.http_listen_addr
+    );
+
+    // Start HTTP redirect server as a separate tokio task
+    tokio::spawn(run_http_redirect_server(http_listener));
+
+    // Start listening for HTTPS connections
     let listener = TcpListener::bind(&args.listen_addr)
         .await
         .with_context(|| format!("Failed to bind to {}", args.listen_addr))?;

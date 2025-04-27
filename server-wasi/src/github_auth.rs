@@ -3,6 +3,7 @@ use bincode::{Decode, Encode};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::time::Duration;
 
 const USER_DB_TREE: &str = "user_data";
 const MAX_PROJECTS_PER_USER: usize = 10;
@@ -41,29 +42,72 @@ impl GitHubAuth {
         Ok(Self { user_projects, db })
     }
 
-    /// Validate OAuth token directly with GitHub API
-    pub async fn validate_oauth_token(&self, username: &str, token: &str) -> Result<bool> {
-        // Extract token from "Bearer {token}" format if present
-        let token_value = token.strip_prefix("Bearer ").unwrap_or(token).trim();
+    /// Authenticate and extract username from GitHub token in a single API call
+    /// Returns (username, is_valid) tuple
+    pub async fn authenticate_github(&self, token: &str) -> Result<(String, bool)> {
+        // Check if the token is in the format "username:token"
+        let (provided_username, token_value) =
+            if let Some((username, token_part)) = token.split_once(':') {
+                (
+                    Some(username.to_string()),
+                    token_part
+                        .strip_prefix("Bearer ")
+                        .unwrap_or(token_part)
+                        .trim(),
+                )
+            } else {
+                (None, token.strip_prefix("Bearer ").unwrap_or(token).trim())
+            };
 
-        // Create client to verify with GitHub API
-        let client = reqwest::Client::new();
-        let response = client
+        // Create client with timeout to verify with GitHub API
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(3))
+            .build()?;
+
+        // Make a single API call to GitHub
+        let response = match client
             .get("https://api.github.com/user")
             .header("User-Agent", "faasta-server")
             .header("Authorization", format!("Bearer {}", token_value))
             .send()
-            .await?;
+            .await
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                tracing::error!("GitHub API request failed: {}", e);
+                return Ok(("".to_string(), false));
+            }
+        };
 
         if !response.status().is_success() {
-            return Ok(false);
+            tracing::warn!("GitHub API returned error status: {}", response.status());
+            return Ok(("".to_string(), false));
         }
 
-        // Verify username matches
-        let github_user: Value = response.json().await?;
+        // Parse response and extract username
+        let github_user: Value = match response.json().await {
+            Ok(json) => json,
+            Err(e) => {
+                tracing::error!("Failed to parse GitHub response: {}", e);
+                return Ok(("".to_string(), false));
+            }
+        };
+
         let api_username = github_user["login"].as_str().unwrap_or("");
 
-        Ok(api_username == username)
+        // If username was provided in token, verify it matches
+        if let Some(provided) = provided_username {
+            if provided != api_username {
+                tracing::warn!(
+                    "Username mismatch: provided '{}', GitHub returned '{}'",
+                    provided,
+                    api_username
+                );
+                return Ok((api_username.to_string(), false));
+            }
+        }
+
+        Ok((api_username.to_string(), true))
     }
 
     /// Check if a user can upload more projects (limit is MAX_PROJECTS_PER_USER)

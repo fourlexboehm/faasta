@@ -3,6 +3,8 @@ use faasta_interface::FunctionServiceClient;
 use std::io;
 // futures prelude removed
 use s2n_quic::client::Connect;
+use s2n_quic::provider::tls::default::callbacks::VerifyHostNameCallback;
+use s2n_quic::provider::tls::default::Client as TlsClient;
 use s2n_quic::Client;
 use std::fs;
 use std::net::SocketAddr;
@@ -24,12 +26,53 @@ fn same_file_path(a: &str, b: &str) -> bool {
 
 // Create a connection to the function service
 pub async fn connect_to_function_service(server_addr: &str) -> Result<FunctionServiceClient> {
+    // Check if we're connecting to localhost or 127.0.0.1
+    let skip_tls_validation =
+        server_addr.starts_with("localhost:") || server_addr.starts_with("127.0.0.1:");
+
     // Set up the QUIC client with minimal logging
-    let client = Client::builder()
-        .with_io("0.0.0.0:0")
-        .context("Failed to set up client IO")?
-        .start()
-        .context("Failed to start client")?;
+    let client = if skip_tls_validation {
+        // Create a struct that implements VerifyHostNameCallback to accept any hostname
+        struct AcceptAnyHostname;
+        impl VerifyHostNameCallback for AcceptAnyHostname {
+            fn verify_host_name(&self, _server_name: &str) -> bool {
+                // Always return true to accept any hostname
+                true
+            }
+        }
+
+        // Use embedded certificate for localhost/127.0.0.1 connections
+        // This certificate is included at compile time
+        // It is self signed and matches the one in server-wasi, Not for Production use!
+        let cert_pem = include_str!("../certs/cert.pem");
+
+        // Build a TLS configuration using the embedded certificate
+        let tls_config = TlsClient::builder()
+            .with_certificate(cert_pem)
+            .context("Failed to add embedded certificate")?
+            // Skip hostname verification to allow self-signed certs on localhost
+            .with_verify_host_name_callback(AcceptAnyHostname)
+            .context("Failed to set hostname verification callback")?
+            .build()
+            .context("Failed to build TLS config")?;
+
+        // Use this config in the QUIC client
+        Client::builder()
+            .with_tls(tls_config)
+            .context("Failed to set TLS config")?
+            .with_io("0.0.0.0:0")
+            .context("Failed to set up client IO")?
+            .start()
+            .context("Failed to start client")?
+    } else {
+        // Standard client with default TLS settings
+        // For non-localhost connections, use the system's PKI
+        Client::builder()
+            .with_io("0.0.0.0:0")
+            .context("Failed to set up client IO")?
+            .start()
+            .context("Failed to start client")?
+    };
 
     // Parse the server address, handling both IP:port and hostname:port formats
     let addr: SocketAddr = match server_addr.parse() {
@@ -114,6 +157,8 @@ pub async fn connect_to_function_service(server_addr: &str) -> Result<FunctionSe
 
     let framed = LengthDelimitedCodec::builder().new_framed(stream);
     let transport = transport::new(framed, Bincode::default());
+
+    // Use default client config
     let client = FunctionServiceClient::new(Default::default(), transport).spawn();
 
     Ok(client)
@@ -202,8 +247,8 @@ pub async fn handle_run(port: u16) -> io::Result<()> {
     // Validate the project structure
     if !package_root.join("src").join("lib.rs").exists() {
         spinner.finish_and_clear();
-        eprintln!("Error: src/lib.rs is missing. This file is required for FaaSta functions.");
-        eprintln!("Hint: Run 'cargo faasta new <n>' to create a new FaaSta project.");
+        eprintln!("Error: src/lib.rs is missing. This file is required for Faasta functions.");
+        eprintln!("Hint: Run 'cargo faasta new <n>' to create a new Faasta project.");
         exit(1);
     }
 

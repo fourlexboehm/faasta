@@ -27,6 +27,12 @@ pub struct FunctionMetric {
 
 impl FunctionMetric {
     pub fn new(function_name: String) -> Self {
+        // Initialize the last_called timestamp to current time
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::from_secs(0))
+            .as_millis() as u64;
+
         // Try to load from sled if it exists
         let metric = if let Ok(Some(data)) = METRICS_DB.get(function_name.as_bytes()) {
             if let Ok(((total_time, call_count, last_called), _)) =
@@ -42,28 +48,32 @@ impl FunctionMetric {
                     last_called: AtomicU64::new(last_called),
                 }
             } else {
-                Self::default(function_name)
+                Self::default(function_name, now)
             }
         } else {
-            Self::default(function_name)
+            Self::default(function_name, now)
         };
 
+        debug!(
+            "Created or loaded metric for function: {}",
+            metric.function_name
+        );
         metric
     }
 
-    fn default(function_name: String) -> Self {
+    fn default(function_name: String, now: u64) -> Self {
         Self {
             function_name,
             total_time: AtomicU64::new(0),
             call_count: AtomicU64::new(0),
-            last_called: AtomicU64::new(0),
+            last_called: AtomicU64::new(now),
         }
     }
 
     pub fn record_call(&self, duration_ms: u64) {
         // Update in-memory metrics
-        self.total_time.fetch_add(duration_ms, Ordering::Relaxed);
-        self.call_count.fetch_add(1, Ordering::Relaxed);
+        let _ = self.total_time.fetch_add(duration_ms, Ordering::Relaxed);
+        let _ = self.call_count.fetch_add(1, Ordering::Relaxed);
 
         // Update last called timestamp (milliseconds since epoch)
         let now = SystemTime::now()
@@ -210,6 +220,8 @@ pub fn get_or_create_metric(function_name: &str) -> Option<FunctionMetric> {
     let is_new_function = !FUNCTION_METRICS.contains_key(function_name);
 
     if is_new_function {
+        debug!("Creating new metric for function: {}", function_name);
+
         // First check if the function's WASM file exists
         if !function_wasm_exists(function_name) {
             return None;
@@ -224,25 +236,33 @@ pub fn get_or_create_metric(function_name: &str) -> Option<FunctionMetric> {
             .contains_key(function_name.as_bytes())
             .unwrap_or(false)
         {
+            // Get current time in milliseconds for initialization
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::from_secs(0))
+                .as_millis() as u64;
+
             // Initialize with zeros
             let initial_data =
-                match bincode::encode_to_vec((0u64, 0u64, 0u64), bincode::config::standard()) {
+                match bincode::encode_to_vec((0u64, 0u64, now), bincode::config::standard()) {
                     Ok(data) => data,
                     Err(e) => {
                         error!(
                             "Failed to encode initial metrics for new function {}: {}",
                             function_name, e
                         );
-                        return FunctionMetric::new(function_name.to_string()).into();
+                        return None;
                     }
                 };
             let _ = METRICS_DB.insert(function_name.as_bytes(), initial_data);
             debug!("Added new function '{}' to metrics database", function_name);
         }
     }
-    // Get a copy of the metric
-    let entry = FUNCTION_METRICS.get(function_name).unwrap();
-    FunctionMetric::new(entry.function_name.clone()).into()
+
+    // Create a copy of the metric to return
+    FUNCTION_METRICS
+        .get(function_name)
+        .map(|entry| FunctionMetric::new(entry.function_name.clone()))
 }
 
 // Timer utility to measure function execution time
@@ -252,6 +272,7 @@ pub struct Timer {
 }
 
 impl Timer {
+    #[tracing::instrument(level = "debug")]
     pub fn new(function_name: String) -> Self {
         Self {
             start: SystemTime::now(),
