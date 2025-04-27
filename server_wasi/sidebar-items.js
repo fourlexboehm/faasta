@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["load_tls_config","main","redirect_to_website","run_server","text_response"],"mod":["cert_manager","github_auth","metrics","rpc_service"],"static":["SERVER"],"struct":["Args","FaastaClientState","FaastaServer"]};
+window.SIDEBAR_ITEMS = {"fn":["load_tls_config","main","redirect_to_website","run_http_redirect_server","run_server","text_response"],"mod":["cert_manager","github_auth","metrics","rpc_service"],"static":["SERVER"],"struct":["Args","FaastaClientState","FaastaServer"]};
