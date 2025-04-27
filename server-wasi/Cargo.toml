@@ -38,3 +38,5 @@ rustls = { version = "0.23.25", features = ["ring"] }
 tokio-util = { version = "0.7", features = ["codec", "compat"] }
 dotenvy = "0.15"
 x509-parser = "0.17.0"
+# Add axum for HTTP redirection
+axum = "0.7.9"

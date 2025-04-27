@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{exit, Command};
 // Removed unused imports
 
-const INVOKE_URL: &str = "https://faasta.xyz/";
+const DEFAULT_INVOKE_URL: &str = "https://faasta.xyz/";
 const MAX_PROJECTS_PER_USER: usize = 10;
 const CONFIG_DIR: &str = ".faasta";
 const CONFIG_FILE: &str = "config.json";
@@ -330,7 +330,13 @@ async fn main() {
                 Ok(Ok(message)) => {
                     spinner.finish_and_clear();
                     println!("✅ {}", message);
-                    println!("Function URL: {}", format_function_url(&function_name));
+
+                    // Extract server hostname from server address (remove port)
+                    let server_host = extract_server_host(&args.server);
+                    println!(
+                        "Function URL: {}",
+                        format_function_url(&function_name, &server_host)
+                    );
                 }
                 Ok(Err(e)) => {
                     spinner.finish_and_clear();
@@ -385,9 +391,9 @@ async fn main() {
             if !Path::new("src").join("lib.rs").exists() {
                 spinner.finish_and_clear();
                 eprintln!(
-                    "Error: src/lib.rs is missing. This file is required for FaaSta functions."
+                    "Error: src/lib.rs is missing. This file is required for Faasta functions."
                 );
-                eprintln!("Hint: Run 'cargo faasta new <name>' to create a new FaaSta project.");
+                eprintln!("Hint: Run 'cargo faasta new <name>' to create a new Faasta project.");
                 exit(1);
             }
 
@@ -635,7 +641,13 @@ async fn main() {
                     Ok(Ok(message)) => {
                         spinner.finish_and_clear();
                         println!("✅ {}", message);
-                        println!("Function URL: {}", format_function_url(&function_name));
+
+                        // Extract server hostname from server address (remove port)
+                        let server_host = extract_server_host(&build_args.server);
+                        println!(
+                            "Function URL: {}",
+                            format_function_url(&function_name, &server_host)
+                        );
                     }
                     Ok(Err(e)) => {
                         spinner.finish_and_clear();
@@ -1028,16 +1040,23 @@ pub const CLAP_STYLING: clap::builder::styling::Styles = clap::builder::styling:
     .valid(clap_cargo::style::VALID)
     .invalid(clap_cargo::style::INVALID);
 
-/// Formats the function URL based on the INVOKE_URL
-/// If INVOKE_URL is a domain (not localhost or an IP), it uses function_name as a subdomain
+/// Formats the function URL based on the server URL
+/// If server is a domain (not localhost or an IP), it uses function_name as a subdomain
 /// Otherwise, it appends function_name as a path
-fn format_function_url(function_name: &str) -> String {
-    // Parse the INVOKE_URL to get the hostname
+fn format_function_url(function_name: &str, server: &str) -> String {
+    // Ensure server has a scheme
+    let server_url = if !server.contains("://") {
+        format!("https://{}", server)
+    } else {
+        server.to_string()
+    };
+
+    // Parse the server URL to get the hostname
     // Format: scheme://host/path
-    let url_parts: Vec<&str> = INVOKE_URL.split("://").collect();
+    let url_parts: Vec<&str> = server_url.split("://").collect();
     if url_parts.len() != 2 {
-        // If URL doesn't follow the expected format, fall back to the original behavior
-        return format!("{}{}", INVOKE_URL, function_name);
+        // If URL doesn't follow the expected format, fall back to a simple approach
+        return format!("https://{}/{}", server, function_name);
     }
 
     let scheme = url_parts[0];
@@ -1050,15 +1069,30 @@ fn format_function_url(function_name: &str) -> String {
     // Check if host is localhost or an IP address
     if host == "localhost" || host == "127.0.0.1" || is_ip_address(host) {
         // For localhost or IP, append function_name as a path
-        let base = if INVOKE_URL.ends_with('/') {
-            INVOKE_URL.to_string()
+        let base = if server_url.ends_with('/') {
+            server_url
         } else {
-            format!("{}/", INVOKE_URL)
+            format!("{}/", server_url)
         };
         format!("{}{}", base, function_name)
     } else {
         // For a domain name, use function_name as a subdomain
         format!("{}://{}.{}/", scheme, function_name, host)
+    }
+}
+
+/// Extract the server host from a server address (removing any port)
+fn extract_server_host(server_addr: &str) -> String {
+    // If it already has a scheme, use it as is
+    if server_addr.contains("://") {
+        return server_addr.to_string();
+    }
+
+    // Remove port if present
+    if let Some(host) = server_addr.split(':').next() {
+        format!("https://{}", host)
+    } else {
+        format!("https://{}", server_addr)
     }
 }
 
@@ -1068,7 +1102,7 @@ fn is_ip_address(host: &str) -> bool {
 }
 
 async fn invoke_function(name: &str, arg: &str) -> Result<(), reqwest::Error> {
-    let function_url = format_function_url(name);
+    let function_url = format_function_url(name, DEFAULT_INVOKE_URL);
     let invoke_url = if function_url.ends_with('/') {
         format!("{}{}", function_url, arg)
     } else {

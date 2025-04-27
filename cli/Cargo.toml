@@ -1,6 +1,6 @@
 [package]
 name = "cargo-faasta"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "Build and deploy wasi-http wasm to the faasta serverless platform"
@@ -13,7 +13,6 @@ anyhow.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
 reqwest = { version = "0.12.12", features = ["blocking", "stream", "multipart", "json"] }
-walkdir = "2.5.0"
 clap = { version = "4", features = ["derive"] }
 clap-cargo = "0.15.1"
 indicatif = "0.17.11"
@@ -24,13 +23,7 @@ open = "5.0.1"
 tiny_http = "0.12.0"
 url = "2.5.0"
 faasta-interface = { path = "../interface", version = "0.1.0" }
-futures = "0.3.30"
 github-app-auth = "3.0.1"
 s2n-quic = "1.36.0"
 tarpc = { version = "0.36.0", features = ["tokio1", "serde1"] }
 tracing = "0.1.40"
-
-[dev-dependencies]
-tempfile = "3.10.1"
-assert_cmd = "2.0.14"
-predicates = "3.1.0"
