@@ -95,7 +95,7 @@ impl FunctionMetric {
         self.last_called.store(now, Ordering::Relaxed);
 
         // Log the metrics update with more detailed information
-        info!(
+        debug!(
             "Recorded metrics for function '{}': duration={}ms, prev_total={}ms, new_total={}ms, prev_calls={}, new_calls={}",
             self.function_name,
             duration_ms,
@@ -176,10 +176,7 @@ impl FunctionMetric {
                 ),
             }
         } else {
-            error!(
-                "Failed to encode metrics for '{}'",
-                self.function_name
-            );
+            error!("Failed to encode metrics for '{}'", self.function_name);
         }
     }
 }
@@ -238,19 +235,16 @@ pub fn get_metrics() -> Metrics {
                     let total = m.total_time.load(Ordering::Relaxed);
                     let calls = m.call_count.load(Ordering::Relaxed);
                     let last = m.last_called.load(Ordering::Relaxed);
-                    
+
                     info!(
                         "In-memory metrics for '{}': total={}ms, calls={}, last={}",
                         function_name, total, calls, last
                     );
-                    
+
                     (total, calls, last)
                 })
                 .unwrap_or_else(|| {
-                    info!(
-                        "No in-memory metrics for '{}', using zeros",
-                        function_name
-                    );
+                    info!("No in-memory metrics for '{}', using zeros", function_name);
                     (0, 0, 0)
                 });
 
@@ -304,26 +298,26 @@ pub fn get_metrics() -> Metrics {
 pub fn get_or_create_metric(function_name: &str) -> Option<FunctionMetric> {
     // Use entry API to reduce lock contention
     let entry = FUNCTION_METRICS.entry(function_name.to_string());
-    
+
     match entry {
         dashmap::mapref::entry::Entry::Occupied(occupied) => {
             // Return a clone of the existing metric
             Some(FunctionMetric::new(occupied.key().clone()))
-        },
+        }
         dashmap::mapref::entry::Entry::Vacant(vacant) => {
             // First check if the function's WASM file exists
             if !function_wasm_exists(function_name) {
                 return None;
             }
-            
+
             debug!("Creating new metric for function: {}", function_name);
-            
+
             // Create the new metric
             let metric = FunctionMetric::new(function_name.to_string());
-            
+
             // Insert it into the map
             vacant.insert(metric.clone());
-            
+
             // New function added - ensure it's recorded in Sled DB even if no calls happen
             if !METRICS_DB
                 .contains_key(function_name.as_bytes())
@@ -350,7 +344,7 @@ pub fn get_or_create_metric(function_name: &str) -> Option<FunctionMetric> {
                 let _ = METRICS_DB.insert(function_name.as_bytes(), initial_data);
                 debug!("Added new function '{}' to metrics database", function_name);
             }
-            
+
             Some(metric)
         }
     }
@@ -402,7 +396,10 @@ pub fn flush_metrics_to_db() {
 
         // Skip if no calls were made since last flush
         if call_count == 0 {
-            debug!("Skipping flush for function '{}' - no calls since last flush", function_name);
+            debug!(
+                "Skipping flush for function '{}' - no calls since last flush",
+                function_name
+            );
             continue; // Skip if no calls were made
         }
 

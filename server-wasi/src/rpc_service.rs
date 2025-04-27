@@ -205,7 +205,7 @@ impl FunctionServiceImpl {
 
         // Get the user's projects from the user_tree
         let mut user_functions = Vec::new();
-        
+
         // Get user data to find which projects they own
         if let Some(projects) = self.github_auth.get_user_projects(&username) {
             // For each project owned by the user, get the function info
@@ -221,7 +221,10 @@ impl FunctionServiceImpl {
                             user_functions.push(function_info);
                         }
                         Err(e) => {
-                            error!("Failed to deserialize function info for '{}': {}", project_name, e);
+                            error!(
+                                "Failed to deserialize function info for '{}': {}",
+                                project_name, e
+                            );
                         }
                     }
                 }
@@ -231,11 +234,7 @@ impl FunctionServiceImpl {
         Ok(user_functions)
     }
 
-    async fn unpublish_impl(
-        &self,
-        name: String,
-        github_auth_token: String,
-    ) -> FunctionResult<()> {
+    async fn unpublish_impl(&self, name: String, github_auth_token: String) -> FunctionResult<()> {
         info!("Processing unpublish request for function: {}", name);
 
         // Use the new combined authentication function
@@ -328,10 +327,7 @@ impl FunctionServiceImpl {
         }
     }
 
-    async fn get_metrics_impl(
-        &self,
-        github_auth_token: String,
-    ) -> FunctionResult<Metrics> {
+    async fn get_metrics_impl(&self, github_auth_token: String) -> FunctionResult<Metrics> {
         // Use the new combined authentication function
         let (username, is_valid) = self
             .github_auth

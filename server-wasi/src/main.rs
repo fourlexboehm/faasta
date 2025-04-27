@@ -49,10 +49,17 @@ use hyper::Uri;
 
 // Global server reference for cache management
 pub static SERVER: OnceCell<Arc<FaastaServer>> = OnceCell::new();
-pub static SHARED_LINKER: OnceCell<Linker<FaastaClientState>> = OnceCell::new();
-pub static STORE_TEMPLATE_CTX: OnceCell<Box<dyn Fn() -> FaastaClientState + Send + Sync>> = 
-    OnceCell::new();
 
+// Define the client state that holds ResourceTable, WasiCtx, and WasiHttpCtx
+pub struct FaastaClientState {
+    table: ResourceTable,
+    wasi: WasiCtx,
+    http: WasiHttpCtx,
+}
+
+pub static SHARED_LINKER: OnceCell<Linker<FaastaClientState>> = OnceCell::new();
+pub static STORE_TEMPLATE_CTX: OnceCell<Box<dyn Fn() -> FaastaClientState + Send + Sync>> =
+    OnceCell::new();
 
 // Create a basic response with string content
 fn text_response(status: u16, text: &str) -> Result<Response<HyperOutgoingBody>> {
@@ -84,15 +91,6 @@ fn redirect_to_website() -> Result<Response<HyperOutgoingBody>> {
         .header("Location", "https://website.faasta.xyz")
         .header("Content-Type", "text/plain")
         .body(HyperOutgoingBody::new(body))?)
-}
-
-// Define the client state that holds ResourceTable, WasiCtx, and WasiHttpCtx
-struct FaastaClientState {
-    table: ResourceTable,
-    wasi: WasiCtx,
-    http: WasiHttpCtx,
-    #[allow(dead_code)] // Kept for future telemetry/debugging
-    function_name: String,
 }
 
 impl wasmtime_wasi::IoView for FaastaClientState {
@@ -173,10 +171,12 @@ impl FaastaServer {
         }
         if self.component_cache.contains_key(function_name) {
             self.component_cache.remove(function_name);
-            debug!("Removed function '{}' from component type cache", function_name);
+            debug!(
+                "Removed function '{}' from component type cache",
+                function_name
+            );
         }
     }
-
 }
 
 // Implement request handling methods on RequestContext
@@ -308,7 +308,6 @@ impl RequestContext {
             redirect_to_website()
         }
     }
-
 }
 
 // Implement function execution methods on RequestContext
@@ -320,39 +319,34 @@ impl RequestContext {
         function_path: &PathBuf,
     ) -> Result<Response<HyperOutgoingBody>> {
         let _timer = Timer::new(function_name.to_string());
-        
+
         debug!(
             "Executing function: {} [path: {:?}]",
             function_name, function_path
         );
-        
+
         // Initialize a store template function if not already done
         let store_template = STORE_TEMPLATE_CTX.get_or_init(|| {
             // This template function will be used to create a similarly configured store each time
             Box::new(move || {
                 FaastaClientState {
                     table: ResourceTable::new(),
-                    wasi: WasiCtxBuilder::new()
-                        .inherit_stdio()
-                        .build(),
+                    wasi: WasiCtxBuilder::new().inherit_stdio().build(),
                     http: WasiHttpCtx::new(),
-                    function_name: String::new(), // Will be set for each function
                 }
             })
         });
-        
+
         // Use the template to create a store with similar configuration
         let mut client_state = store_template();
-        
-        // Set the function-specific details
-        client_state.function_name = function_name.to_string();
-        
+
+
         // Update environment for this specific function
         client_state.wasi = WasiCtxBuilder::new()
-            .inherit_stdio()
+            // .inherit_stdio()
             .env("FUNCTION_NAME", function_name)
             .build();
-        
+
         // Get or load the ProxyPre
         let pre = self
             .get_or_load_proxy_pre(function_name, function_path)
@@ -360,7 +354,7 @@ impl RequestContext {
 
         // Create store with client state
         let mut store = Store::new(pre.engine(), client_state);
-        
+
         // Setup the response channel
         let (sender, receiver) = tokio::sync::oneshot::channel();
 
@@ -369,7 +363,7 @@ impl RequestContext {
         let wasi_resp_out = store.data_mut().new_response_outparam(sender)?;
 
         let proxy = pre.instantiate_async(&mut store).await?;
-        
+
         // Spawn a task to handle the function execution
         let task = tokio::task::spawn(async move {
             proxy
@@ -409,20 +403,21 @@ impl RequestContext {
         if let Some(cached) = self.pre_cache.get(function_name) {
             return Ok(cached.value().clone());
         }
-        
+
         // Get the component, either from cache or newly loaded
         let component = if let Some(cached) = self.component_cache.get(function_name) {
             cached.value().clone()
         } else {
             // Load the component
             let component = Component::from_file(&self.engine, function_path)?;
-            
+
             // Cache the component
-            self.component_cache.insert(function_name.to_string(), component.clone());
-            
+            self.component_cache
+                .insert(function_name.to_string(), component.clone());
+
             component
         };
-        
+
         // Get the shared linker or create it once
         let linker = SHARED_LINKER.get_or_init(|| {
             let mut linker = Linker::new(&self.engine);
@@ -432,15 +427,16 @@ impl RequestContext {
                 .expect("Failed to add WASI to linker");
             wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)
                 .expect("Failed to add WASI-HTTP to linker");
-            
+
             linker
         });
 
         let pre = ProxyPre::new(linker.instantiate_pre(&component)?)?;
-        
+
         // Cache it for future use - only clone the string once when inserting
-        self.pre_cache.insert(function_name.to_string(), pre.clone());
-        
+        self.pre_cache
+            .insert(function_name.to_string(), pre.clone());
+
         Ok(pre)
     }
 }
@@ -525,7 +521,7 @@ async fn run_rpc_server(mut quic_server: s2n_quic::Server, server: Arc<FaastaSer
     while let Some(mut connection) = quic_server.accept().await {
         // Clone the server Arc once for each connection
         let server_clone = server.clone();
-        
+
         tokio::spawn(async move {
             debug!("Accepted new connection");
 
@@ -534,7 +530,7 @@ async fn run_rpc_server(mut quic_server: s2n_quic::Server, server: Arc<FaastaSer
                 let functions_dir = server_clone.functions_dir.clone();
                 let github_auth = server_clone.github_auth.clone();
                 let metadata_db = server_clone.metadata_db.clone();
-                
+
                 tokio::spawn(async move {
                     debug!("Accepted new stream");
                     let framed = LengthDelimitedCodec::builder().new_framed(stream);
@@ -550,7 +546,7 @@ async fn run_rpc_server(mut quic_server: s2n_quic::Server, server: Arc<FaastaSer
                     // Process this connection
                     // Use default configuration but with a longer context deadline
                     let server_channel = BaseChannel::with_defaults(transport);
-                    
+
                     // Use a reference to the service to call serve()
                     server_channel
                         .execute(service.serve())
@@ -666,7 +662,7 @@ async fn main() -> Result<()> {
     // Pre-compile available functions to improve startup time
     async fn precompile_functions(engine: &Engine, functions_dir: &Path) -> Result<()> {
         info!("Pre-compiling functions...");
-        
+
         // Find all .wasm files in the functions directory
         let function_files = std::fs::read_dir(functions_dir)?
             .filter_map(|entry| {
@@ -679,17 +675,17 @@ async fn main() -> Result<()> {
                 }
             })
             .collect::<Vec<_>>();
-            
+
         // Log how many functions we're going to precompile
         info!("Found {} functions to precompile", function_files.len());
-        
+
         // Precompile each function
         for path in function_files {
             let filename = path.file_name().unwrap().to_string_lossy();
             info!("Precompiling function: {}", filename);
             let _ = Component::from_file(engine, &path)?;
         }
-        
+
         info!("Precompilation complete");
         Ok(())
     }
@@ -715,33 +711,34 @@ async fn main() -> Result<()> {
     let pre_cache = sled::open(&args.db_path)?;
 
     // Configure Wasmtime engine
-    let cache_dir = std::env::var("WASMTIME_CACHE_DIR").unwrap_or_else(|_| "./data/wasmtime-cache".to_string());
+    let cache_dir =
+        std::env::var("WASMTIME_CACHE_DIR").unwrap_or_else(|_| "./data/wasmtime-cache".to_string());
     std::fs::create_dir_all(&cache_dir)?;
     info!("Using wasmtime cache directory: {}", cache_dir);
 
     let mut config = Config::default();
     config.async_support(true);
     config.wasm_component_model(true);
-    
+
     // Enable module caching to speed up startup time
     config.cache_config_load_default()?;
-    
+
     // Set compilation settings
     config.cranelift_opt_level(wasmtime::OptLevel::Speed);
-    
+
     // Enable parallel compilation if available
     config.parallel_compilation(true);
-    
+
     // Precompile modules ahead of time
     config.strategy(wasmtime::Strategy::Cranelift);
-    
+
     // Create the engine
     let engine = Engine::new(&config)?;
-    
-    // Precompile functions
-    if let Err(e) = precompile_functions(&engine, &args.functions_path).await {
-        error!("Error precompiling functions: {}", e);
-    }
+
+    // // Precompile functions
+    // if let Err(e) = precompile_functions(&engine, &args.functions_path).await {
+    //     error!("Error precompiling functions: {}", e);
+    // }
 
     // Create server
     let server_instance = Arc::new(
@@ -833,14 +830,14 @@ async fn main() -> Result<()> {
 
                     // Create a lightweight request context once for this connection
                     let context = server.get_request_context();
-                    
+
                     // Create a service function for handling HTTP requests
                     // Clone the context for each request to avoid lifetime issues
                     let context_clone = context.clone();
                     let service = service_fn(move |req: Request<Incoming>| {
                         // Use the cloned context for each request
                         let context = context_clone.clone();
-                        
+
                         async move {
                             match context.handle_request(req).await {
                                 Ok(response) => Ok::<_, anyhow::Error>(response),

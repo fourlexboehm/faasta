@@ -168,9 +168,11 @@ impl GitHubAuth {
 
         Ok(())
     }
-    
+
     /// Get the list of projects owned by a user
     pub fn get_user_projects(&self, username: &str) -> Option<Vec<String>> {
-        self.user_projects.get(username).map(|user_data| user_data.projects.clone())
+        self.user_projects
+            .get(username)
+            .map(|user_data| user_data.projects.clone())
     }
 }
