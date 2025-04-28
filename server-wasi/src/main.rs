@@ -35,7 +35,6 @@ use tokio_rustls::TlsAcceptor;
 use tracing::{debug, error, info, Level};
 use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
-use wasmtime_wasi::bindings::LinkOptions;
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi_http::bindings::http::types::{ErrorCode, Scheme};
 use wasmtime_wasi_http::bindings::ProxyPre;
@@ -326,18 +325,15 @@ impl RequestContext {
         // Initialize a store template function if not already done
         let store_template = STORE_TEMPLATE_CTX.get_or_init(|| {
             // This template function will be used to create a similarly configured store each time
-            Box::new(move || {
-                FaastaClientState {
-                    table: ResourceTable::new(),
-                    wasi: WasiCtxBuilder::new().inherit_stdio().build(),
-                    http: WasiHttpCtx::new(),
-                }
+            Box::new(move || FaastaClientState {
+                table: ResourceTable::new(),
+                wasi: WasiCtxBuilder::new().inherit_stdio().build(),
+                http: WasiHttpCtx::new(),
             })
         });
 
         // Use the template to create a store with similar configuration
         let mut client_state = store_template();
-
 
         // Update environment for this specific function
         client_state.wasi = WasiCtxBuilder::new()
@@ -403,18 +399,15 @@ impl RequestContext {
         }
 
         // Get the component, either from cache or newly loaded
-            // Load the component
+        // Load the component
         let component = Component::from_file(&self.engine, function_path)?;
-
-
 
         // Get the shared linker or create it once
         let linker = SHARED_LINKER.get_or_init(|| {
             let mut linker = Linker::new(&self.engine);
 
             // Set up WASI and WASI-HTTP definitions - only needs to be done once
-            wasmtime_wasi::add_to_linker_async(&mut linker)
-                .expect("Failed to add WASI to linker");
+            wasmtime_wasi::add_to_linker_async(&mut linker).expect("Failed to add WASI to linker");
             wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)
                 .expect("Failed to add WASI-HTTP to linker");
 
@@ -702,7 +695,6 @@ async fn main() -> Result<()> {
     config.async_support(true);
     config.wasm_component_model(true);
     config.memory_init_cow(true);
-
 
     // Enable module caching to speed up startup time
     config.cache_config_load_default()?;
