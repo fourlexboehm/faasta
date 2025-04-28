@@ -25,7 +25,7 @@ TimeoutStopSec=30
 # Security options
 ProtectSystem=full
 PrivateTmp=true
-ProtectHome=true
+ProtectHome=false
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true

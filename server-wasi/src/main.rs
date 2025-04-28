@@ -115,7 +115,6 @@ impl WasiHttpView for FaastaClientState {
 pub struct RequestContext {
     engine: Arc<Engine>,
     pre_cache: Arc<DashMap<String, ProxyPre<FaastaClientState>>>,
-    component_cache: Arc<DashMap<String, Component>>,
     base_domain: String,
     functions_dir: PathBuf,
 }
@@ -137,7 +136,6 @@ impl FaastaServer {
         RequestContext {
             engine: Arc::new(self.engine.clone()),
             pre_cache: Arc::new(self.pre_cache.clone()),
-            component_cache: Arc::new(self.component_cache.clone()),
             base_domain: self.base_domain.clone(),
             functions_dir: self.functions_dir.clone(),
         }
@@ -405,25 +403,17 @@ impl RequestContext {
         }
 
         // Get the component, either from cache or newly loaded
-        let component = if let Some(cached) = self.component_cache.get(function_name) {
-            cached.value().clone()
-        } else {
             // Load the component
-            let component = Component::from_file(&self.engine, function_path)?;
+        let component = Component::from_file(&self.engine, function_path)?;
 
-            // Cache the component
-            self.component_cache
-                .insert(function_name.to_string(), component.clone());
 
-            component
-        };
 
         // Get the shared linker or create it once
         let linker = SHARED_LINKER.get_or_init(|| {
             let mut linker = Linker::new(&self.engine);
 
             // Set up WASI and WASI-HTTP definitions - only needs to be done once
-            wasmtime_wasi::add_to_linker_with_options_async(&mut linker, &LinkOptions::default())
+            wasmtime_wasi::add_to_linker_async(&mut linker)
                 .expect("Failed to add WASI to linker");
             wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)
                 .expect("Failed to add WASI-HTTP to linker");
@@ -663,7 +653,6 @@ async fn main() -> Result<()> {
     async fn precompile_functions(engine: &Engine, functions_dir: &Path) -> Result<()> {
         info!("Pre-compiling functions...");
 
-        // Find all .wasm files in the functions directory
         let function_files = std::fs::read_dir(functions_dir)?
             .filter_map(|entry| {
                 let entry = entry.ok()?;
@@ -709,16 +698,11 @@ async fn main() -> Result<()> {
 
     // Open/create component cache database
     let pre_cache = sled::open(&args.db_path)?;
-
-    // Configure Wasmtime engine
-    let cache_dir =
-        std::env::var("WASMTIME_CACHE_DIR").unwrap_or_else(|_| "./data/wasmtime-cache".to_string());
-    std::fs::create_dir_all(&cache_dir)?;
-    info!("Using wasmtime cache directory: {}", cache_dir);
-
     let mut config = Config::default();
     config.async_support(true);
     config.wasm_component_model(true);
+    config.memory_init_cow(true);
+
 
     // Enable module caching to speed up startup time
     config.cache_config_load_default()?;
@@ -736,9 +720,9 @@ async fn main() -> Result<()> {
     let engine = Engine::new(&config)?;
 
     // // Precompile functions
-    // if let Err(e) = precompile_functions(&engine, &args.functions_path).await {
-    //     error!("Error precompiling functions: {}", e);
-    // }
+    if let Err(e) = precompile_functions(&engine, &args.functions_path).await {
+        error!("Error precompiling functions: {}", e);
+    }
 
     // Create server
     let server_instance = Arc::new(
