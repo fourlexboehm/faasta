@@ -1,0 +1,19 @@
+[workspace]
+
+[package]
+name = "http-server"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+waki = { version = "0.5.1", features = ["json"] }
+serde = { version = "1.0.202", features = ["derive"] }
+
+# reduce wasm binary size
+[profile.release]
+lto = true
+strip = "symbols"
