@@ -5,12 +5,11 @@ mod run;
 
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::fs;
 // Removed unused imports
 use std::fmt;
-use std::path::{Path, PathBuf};
-use std::process::{exit, Command};
+use std::path::PathBuf;
+use std::process::exit;
 // Removed unused imports
 
 const DEFAULT_INVOKE_URL: &str = "https://faasta.xyz/";
@@ -138,73 +137,15 @@ async fn main() {
                 }
             };
 
-            let output = Command::new("cargo")
-                .args(["metadata", "--format-version=1"])
-                .output()
-                .unwrap_or_else(|e| {
+            // Get project information
+            let (target_directory, package_name, _) = match run::get_project_info() {
+                Ok(info) => info,
+                Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Failed to run cargo metadata: {}", e);
+                    eprintln!("Failed to get project information: {}", e);
                     exit(1);
-                });
-
-            if !output.status.success() {
-                spinner.finish_and_clear();
-                eprintln!("Failed to retrieve cargo metadata");
-                exit(1);
-            }
-
-            // Parse JSON
-            let metadata: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
-                spinner.finish_and_clear();
-                eprintln!("Failed to parse cargo metadata: {}", e);
-                exit(1);
-            });
-
-            // Extract target_directory
-            let target_directory = metadata
-                .get("target_directory")
-                .and_then(Value::as_str)
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    spinner.finish_and_clear();
-                    eprintln!("No 'target_directory' found in cargo metadata");
-                    exit(1);
-                });
-
-            // Get the package name from the current directory's Cargo.toml
-            let packages = metadata
-                .get("packages")
-                .and_then(Value::as_array)
-                .unwrap_or_else(|| {
-                    spinner.finish_and_clear();
-                    eprintln!("No 'packages' found in cargo metadata");
-                    exit(1);
-                });
-
-            // Find the package for the current directory
-            let current_dir = std::env::current_dir().unwrap_or_else(|e| {
-                spinner.finish_and_clear();
-                eprintln!("Failed to get current directory: {}", e);
-                exit(1);
-            });
-
-            let package_name = packages
-                .iter()
-                .filter_map(|pkg| {
-                    let manifest_path = pkg.get("manifest_path")?.as_str()?;
-                    let pkg_dir = Path::new(manifest_path).parent()?;
-                    if same_file_path(&pkg_dir.to_string_lossy(), &current_dir.to_string_lossy()) {
-                        pkg.get("name")?.as_str().map(String::from)
-                    } else {
-                        None
-                    }
-                })
-                .next()
-                .unwrap_or_else(|| {
-                    spinner.finish_and_clear();
-                    eprintln!("Could not find package for current directory");
-                    exit(1);
-                });
+                }
+            };
 
             // Path to the WASM file
             // Note: Rust compiler output converts hyphens to underscores, so we need to
@@ -387,32 +328,20 @@ async fn main() {
             spinner.set_message("Building project...");
             spinner.enable_steady_tick(std::time::Duration::from_millis(100));
 
-            // Validate the project structure
-            if !Path::new("src").join("lib.rs").exists() {
-                spinner.finish_and_clear();
-                eprintln!(
-                    "Error: src/lib.rs is missing. This file is required for Faasta functions."
-                );
-                eprintln!("Hint: Run 'cargo faasta new <name>' to create a new Faasta project.");
-                exit(1);
-            }
-
-            // Build the project for wasm32-wasip2 target
-            spinner.set_message("Building optimized WASI component...");
-
-            // Just use standard cargo build with wasm32-wasip2 target
-            let status = Command::new("cargo")
-                .args(["build", "--release", "--target", "wasm32-wasip2"])
-                .status()
-                .unwrap_or_else(|e| {
+            // Get project information
+            let (target_directory, package_name, package_root) = match run::get_project_info() {
+                Ok(info) => info,
+                Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Failed to run cargo build: {}", e);
+                    eprintln!("Failed to get project information: {}", e);
                     exit(1);
-                });
+                }
+            };
 
-            if !status.success() {
+            // Build the project
+            if let Err(e) = run::build_project(&package_root) {
                 spinner.finish_and_clear();
-                eprintln!("Build failed");
+                eprintln!("Failed to build project: {}", e);
                 exit(1);
             }
 
@@ -439,78 +368,6 @@ async fn main() {
                         None
                     }
                 };
-
-                // Get package info using cargo metadata
-                let output = Command::new("cargo")
-                    .args(["metadata", "--format-version=1"])
-                    .output()
-                    .unwrap_or_else(|e| {
-                        spinner.finish_and_clear();
-                        eprintln!("Failed to run cargo metadata: {}", e);
-                        exit(1);
-                    });
-
-                if !output.status.success() {
-                    spinner.finish_and_clear();
-                    eprintln!("Failed to retrieve cargo metadata");
-                    exit(1);
-                }
-
-                // Parse JSON
-                let metadata: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
-                    spinner.finish_and_clear();
-                    eprintln!("Failed to parse cargo metadata: {}", e);
-                    exit(1);
-                });
-
-                // Extract target_directory
-                let target_directory = metadata
-                    .get("target_directory")
-                    .and_then(Value::as_str)
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| {
-                        spinner.finish_and_clear();
-                        eprintln!("No 'target_directory' found in cargo metadata");
-                        exit(1);
-                    });
-
-                // Get the package name from the current directory's Cargo.toml
-                let packages = metadata
-                    .get("packages")
-                    .and_then(Value::as_array)
-                    .unwrap_or_else(|| {
-                        spinner.finish_and_clear();
-                        eprintln!("No 'packages' found in cargo metadata");
-                        exit(1);
-                    });
-
-                // Find the package for the current directory
-                let current_dir = std::env::current_dir().unwrap_or_else(|e| {
-                    spinner.finish_and_clear();
-                    eprintln!("Failed to get current directory: {}", e);
-                    exit(1);
-                });
-
-                let package_name = packages
-                    .iter()
-                    .filter_map(|pkg| {
-                        let manifest_path = pkg.get("manifest_path")?.as_str()?;
-                        let pkg_dir = Path::new(manifest_path).parent()?;
-                        if same_file_path(
-                            &pkg_dir.to_string_lossy(),
-                            &current_dir.to_string_lossy(),
-                        ) {
-                            pkg.get("name")?.as_str().map(String::from)
-                        } else {
-                            None
-                        }
-                    })
-                    .next()
-                    .unwrap_or_else(|| {
-                        spinner.finish_and_clear();
-                        eprintln!("Could not find package for current directory");
-                        exit(1);
-                    });
 
                 // Path to the WASM file
                 // Note: Rust compiler output converts hyphens to underscores, so we need to
@@ -660,10 +517,6 @@ async fn main() {
                         exit(1);
                     }
                 };
-            } else {
-                spinner.finish_and_clear();
-                println!("✅ Build successful!");
-                println!("Run 'cargo faasta deploy' to deploy your function.");
             }
         }
 
@@ -1129,17 +982,6 @@ async fn invoke_function(name: &str, arg: &str) -> Result<(), reqwest::Error> {
     println!("Response status: {}", resp.status());
     println!("{}", resp.text().await?);
     Ok(())
-}
-
-/// Find a workspace root package if it exists; otherwise pick the current/only package from cargo metadata.
-///
-/// Compare two file paths in a slightly more robust way.
-/// (On Windows, e.g., backslash vs forward slash).
-fn same_file_path(a: &str, b: &str) -> bool {
-    // Convert both to a canonical PathBuf
-    let path_a = Path::new(a).components().collect::<Vec<_>>();
-    let path_b = Path::new(b).components().collect::<Vec<_>>();
-    path_a == path_b
 }
 
 // Function to fetch and display metrics

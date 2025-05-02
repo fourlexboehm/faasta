@@ -17,8 +17,6 @@ const FUNCTIONS_DB_TREE: &str = "functions";
 ///
 #[derive(Clone)]
 pub struct FunctionServiceImpl {
-    functions_dir: PathBuf,
-    github_auth: Arc<GitHubAuth>,
     functions_tree: sled::Tree,
 }
 
@@ -26,21 +24,17 @@ impl FunctionServiceImpl {
     /// Create a new FunctionServiceImpl
     /// Create a new FunctionServiceImpl, loading persisted metadata from sled
     pub fn new(
-        functions_dir: PathBuf,
-        github_auth: Arc<GitHubAuth>,
-        metadata_db: sled::Db,
     ) -> anyhow::Result<Self> {
         // Ensure functions directory exists
-        if !functions_dir.exists() {
-            fs::create_dir_all(&functions_dir)?;
+        let server = SERVER.get().unwrap();
+        if !server.functions_dir.exists() {
+            fs::create_dir_all(&server.functions_dir)?;
         }
 
         // Open or create sled tree for function metadata
-        let functions_tree = metadata_db.open_tree(FUNCTIONS_DB_TREE)?;
+        let functions_tree = server.metadata_db.open_tree(FUNCTIONS_DB_TREE)?;
 
         Ok(Self {
-            functions_dir,
-            github_auth,
             functions_tree,
         })
     }
@@ -55,7 +49,8 @@ impl FunctionServiceImpl {
         github_auth_token: String,
     ) -> FunctionResult<String> {
         // Use the new combined authentication function
-        let (username, is_valid) = self
+        let server = SERVER.get().unwrap();
+        let (username, is_valid) = server
             .github_auth
             .authenticate_github(&github_auth_token)
             .await
@@ -88,7 +83,7 @@ impl FunctionServiceImpl {
 
         // Simple direct approach: use the exact function name for the WASM file
         let wasm_filename = format!("{}.wasm", name);
-        let wasm_path = self.functions_dir.join(&wasm_filename);
+        let wasm_path = server.functions_dir.join(&wasm_filename);
 
         // Check if function already exists
         if wasm_path.exists() {
@@ -130,13 +125,13 @@ impl FunctionServiceImpl {
             }
         } else {
             // New function - enforce project limit
-            if !self.github_auth.can_upload_project(&username, &name) {
+            if !server.github_auth.can_upload_project(&username, &name) {
                 return Err(FunctionError::PermissionDenied(
                     "You have reached the maximum limit of 10 projects".to_string(),
                 ));
             }
             // Register ownership
-            match self.github_auth.add_project(&username, &name).await {
+            match server.github_auth.add_project(&username, &name).await {
                 Ok(_) => debug!("Added project '{}' for user '{}'", name, username),
                 Err(e) => {
                     error!("Failed to add project: {}", e);
@@ -191,7 +186,8 @@ impl FunctionServiceImpl {
         github_auth_token: String,
     ) -> FunctionResult<Vec<FunctionInfo>> {
         // Use the new combined authentication function
-        let (username, is_valid) = self
+        let server = SERVER.get().unwrap();
+        let (username, is_valid) = server
             .github_auth
             .authenticate_github(&github_auth_token)
             .await
@@ -207,7 +203,7 @@ impl FunctionServiceImpl {
         let mut user_functions = Vec::new();
 
         // Get user data to find which projects they own
-        if let Some(projects) = self.github_auth.get_user_projects(&username) {
+        if let Some(projects) = server.github_auth.get_user_projects(&username) {
             // For each project owned by the user, get the function info
             for project_name in projects {
                 // Get function info from the functions tree
@@ -237,8 +233,9 @@ impl FunctionServiceImpl {
     async fn unpublish_impl(&self, name: String, github_auth_token: String) -> FunctionResult<()> {
         info!("Processing unpublish request for function: {}", name);
 
+        let server = SERVER.get().unwrap();
         // Use the new combined authentication function
-        let (username, is_valid) = self
+        let (username, is_valid) = server
             .github_auth
             .authenticate_github(&github_auth_token)
             .await
@@ -290,7 +287,7 @@ impl FunctionServiceImpl {
 
             // Remove WASM file using direct name
             let wasm_filename = format!("{}.wasm", name);
-            let wasm_path = self.functions_dir.join(wasm_filename);
+            let wasm_path = server.functions_dir.join(wasm_filename);
             if wasm_path.exists() {
                 if let Err(e) = fs::remove_file(&wasm_path) {
                     error!("Failed to remove WASM file: {}", e);
@@ -307,7 +304,7 @@ impl FunctionServiceImpl {
             }
 
             // Remove the project from the user's list
-            match self.github_auth.remove_project(&username, &name).await {
+            match server.github_auth.remove_project(&username, &name).await {
                 Ok(_) => {
                     debug!("Removed project '{}' for user '{}'", name, username);
                 }
@@ -329,7 +326,8 @@ impl FunctionServiceImpl {
 
     async fn get_metrics_impl(&self, github_auth_token: String) -> FunctionResult<Metrics> {
         // Use the new combined authentication function
-        let (username, is_valid) = self
+        let server = SERVER.get().unwrap();
+        let (username, is_valid) = server
             .github_auth
             .authenticate_github(&github_auth_token)
             .await
@@ -391,10 +389,15 @@ impl FunctionService for FunctionServiceImpl {
 }
 
 /// Helper function to create a service implementation with GitHub auth
-pub fn create_service_with_github_auth(
-    functions_dir: PathBuf,
-    github_auth: Arc<GitHubAuth>,
-    metadata_db: sled::Db,
-) -> anyhow::Result<FunctionServiceImpl> {
-    FunctionServiceImpl::new(functions_dir, github_auth, metadata_db)
+pub fn create_service() -> anyhow::Result<FunctionServiceImpl> {
+    use crate::metrics::Timer;
+    use tracing::info;
+    
+    info!("Initializing RPC service...");
+    let rpc_init_timer = Timer::new("rpc_service_initialization".to_string());
+    let service = FunctionServiceImpl::new()?;
+    drop(rpc_init_timer); // Explicitly drop to record timing
+    info!("RPC service initialization complete");
+    
+    Ok(service)
 }

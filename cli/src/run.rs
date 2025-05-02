@@ -6,7 +6,6 @@ use s2n_quic::client::Connect;
 use s2n_quic::provider::tls::default::callbacks::VerifyHostNameCallback;
 use s2n_quic::provider::tls::default::Client as TlsClient;
 use s2n_quic::Client;
-use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path as StdPath, PathBuf};
 use std::process::exit;
@@ -164,11 +163,12 @@ pub async fn connect_to_function_service(server_addr: &str) -> Result<FunctionSe
     Ok(client)
 }
 
-// The function to handle the run command
-pub async fn handle_run(port: u16) -> io::Result<()> {
+/// Get the target directory and package name for the current project
+pub fn get_project_info() -> Result<(PathBuf, String, PathBuf), io::Error> {
     let spinner = indicatif::ProgressBar::new_spinner();
-    spinner.set_message("Building project...");
+    spinner.set_message("Getting project information...");
     spinner.enable_steady_tick(std::time::Duration::from_millis(100));
+
     // Get package info using cargo metadata
     let output = std::process::Command::new("cargo")
         .args(["metadata", "--format-version=1"])
@@ -238,11 +238,15 @@ pub async fn handle_run(port: u16) -> io::Result<()> {
             exit(1);
         });
 
-    let package_root = current_dir;
+    spinner.finish_and_clear();
+    Ok((target_directory, package_name, current_dir))
+}
 
-    // Display project info
-    println!("Building project: {}", package_name);
-    println!("Project root: {}", package_root.display());
+/// Build the project for wasm32-wasip2 target
+pub fn build_project(package_root: &PathBuf) -> Result<(), io::Error> {
+    let spinner = indicatif::ProgressBar::new_spinner();
+    spinner.set_message("Building optimized WASI component...");
+    spinner.enable_steady_tick(std::time::Duration::from_millis(100));
 
     // Validate the project structure
     if !package_root.join("src").join("lib.rs").exists() {
@@ -252,15 +256,10 @@ pub async fn handle_run(port: u16) -> io::Result<()> {
         exit(1);
     }
 
-    // Run safety lints - removed (analyze crate no longer used)
-
-    // Build the project for wasm32-wasip2 target
-    spinner.set_message("Building optimized WASI component...");
-
     // Build with wasm32-wasip2 target
     let status = std::process::Command::new("cargo")
         .args(["build", "--release", "--target", "wasm32-wasip2"])
-        .current_dir(&package_root)
+        .current_dir(package_root)
         .status()
         .unwrap_or_else(|e| {
             spinner.finish_and_clear();
@@ -274,101 +273,41 @@ pub async fn handle_run(port: u16) -> io::Result<()> {
         exit(1);
     }
 
-    // Convert to component using wasm-tools
-    spinner.set_message("Converting to WASI component...");
+    spinner.finish_and_clear();
+    println!("✅ Build successful!");
+    Ok(())
+}
 
-    // Convert hyphens to underscores in package name for the WASM file
-    let wasm_filename = format!("{}.wasm", package_name.replace('-', "_"));
+// The function to handle the run command
+pub async fn handle_run(port: u16) -> io::Result<()> {
+    // Get project information
+    let (target_directory, package_name, package_root) = get_project_info()?;
+
+    // Display project info
+    println!("Building project: {}", package_name);
+    println!("Project root: {}", package_root.display());
+
+    // Build the project first
+    build_project(&package_root)?;
+
+    // Get the full WASM file path - use same logic as in deploy
+    let rust_compiled_name = package_name.replace('-', "_");
+    let wasm_filename = format!("{}.wasm", rust_compiled_name);
     let wasm_path = target_directory
         .join("wasm32-wasip2")
         .join("release")
         .join(wasm_filename);
 
-    // Convert hyphens to underscores in package name for the component file
-    let component_filename = format!("{}_component.wasm", package_name.replace('-', "_"));
-    let component_path = target_directory
-        .join("wasm32-wasip2")
-        .join("release")
-        .join(component_filename);
-
-    let status = std::process::Command::new("wasm-tools")
-        .args([
-            "component",
-            "new",
-            wasm_path.to_str().unwrap(),
-            "-o",
-            component_path.to_str().unwrap(),
-        ])
-        .current_dir(&package_root)
-        .status()
-        .unwrap_or_else(|e| {
-            spinner.finish_and_clear();
-            eprintln!("Failed to run wasm-tools: {}", e);
-            exit(1);
-        });
-
-    if !status.success() {
-        spinner.finish_and_clear();
-        eprintln!("Component conversion failed");
+    // Ensure the WASM file exists
+    if !wasm_path.exists() {
+        eprintln!("Error: Could not find compiled WASM at: {}", wasm_path.display());
+        eprintln!("Build seems to have failed or produced output in a different location.");
         exit(1);
     }
 
-    spinner.finish_and_clear();
-    println!("✅ Build successful!");
-
-    // Run the function locally using wasmtime serve
-    println!("Starting local function server on port {}...", port);
-    println!("Function URL: http://localhost:{}", port);
-    println!("Press Ctrl+C to stop the server");
-
-    // Path to the compiled WASI component
-    // Convert hyphens to underscores in package name for the component file
-    let component_filename = format!("{}_component.wasm", package_name.replace('-', "_"));
-    let component_path = target_directory
-        .join("wasm32-wasip2")
-        .join("release")
-        .join(component_filename);
-
-    if !component_path.exists() {
-        eprintln!(
-            "Error: Could not find compiled WASI component at: {}",
-            component_path.display()
-        );
-        exit(1);
-    }
-
-    println!("Loading function from: {}", component_path.display());
-
-    // Copy the component to the server's functions directory for deployment
-    let server_functions_dir = PathBuf::from("server-wasi/functions");
-    if !server_functions_dir.exists() {
-        fs::create_dir_all(&server_functions_dir)
-            .expect("Failed to create server functions directory");
-    }
-
-    // Use the original package name for the server function path (server handles the conversion)
-    let server_function_path = server_functions_dir.join(format!("{}.wasm", package_name));
-    fs::copy(&component_path, &server_function_path).unwrap_or_else(|e| {
-        eprintln!(
-            "Failed to copy component to server functions directory: {}",
-            e
-        );
-        exit(1);
-    });
-
-    println!("Deployed function to: {}", server_function_path.display());
-    println!("Running function with wasmtime serve...");
-
-    // Run wasmtime serve with the component
+    println!("Starting local server on port {}...", port);
     let status = std::process::Command::new("wasmtime")
-        .args([
-            "serve",
-            "--http-port",
-            &port.to_string(),
-            "--addr",
-            "127.0.0.1",
-            component_path.to_str().unwrap(),
-        ])
+        .args(["serve", &wasm_path.to_string_lossy()])
         .current_dir(&package_root)
         .status()
         .unwrap_or_else(|e| {

@@ -34,7 +34,7 @@ use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
 use tracing::{debug, error, info, Level};
 use wasmtime::component::{Component, Linker, ResourceTable};
-use wasmtime::{Config, Engine, Store};
+use wasmtime::{Config, Engine, InstanceAllocationStrategy, PoolingAllocationConfig, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi_http::bindings::http::types::{ErrorCode, Scheme};
 use wasmtime_wasi_http::bindings::ProxyPre;
@@ -47,7 +47,7 @@ use axum::{extract::Host, http::uri::Authority, response::Redirect, Router};
 use hyper::Uri;
 
 // Global server reference for cache management
-pub static SERVER: OnceCell<Arc<FaastaServer>> = OnceCell::new();
+pub static SERVER: OnceCell<FaastaServer> = OnceCell::new();
 
 // Define the client state that holds ResourceTable, WasiCtx, and WasiHttpCtx
 pub struct FaastaClientState {
@@ -110,35 +110,17 @@ impl WasiHttpView for FaastaClientState {
     }
 }
 
-#[derive(Clone)]
-pub struct RequestContext {
-    engine: Arc<Engine>,
-    pre_cache: Arc<DashMap<String, ProxyPre<FaastaClientState>>>,
-    base_domain: String,
-    functions_dir: PathBuf,
-}
-
 // Server state
 pub struct FaastaServer {
     engine: Engine,
     metadata_db: sled::Db,
     pre_cache: DashMap<String, ProxyPre<FaastaClientState>>,
-    component_cache: DashMap<String, Component>,
     base_domain: String,
     functions_dir: PathBuf,
-    github_auth: Arc<GitHubAuth>,
+    github_auth: GitHubAuth,
 }
 
 impl FaastaServer {
-    // Create a lightweight request context with only the fields needed for request handling
-    pub fn get_request_context(&self) -> RequestContext {
-        RequestContext {
-            engine: Arc::new(self.engine.clone()),
-            pre_cache: Arc::new(self.pre_cache.clone()),
-            base_domain: self.base_domain.clone(),
-            functions_dir: self.functions_dir.clone(),
-        }
-    }
 
     async fn new(
         engine: Engine,
@@ -147,12 +129,11 @@ impl FaastaServer {
         functions_dir: PathBuf,
     ) -> Result<Self> {
         // Initialize GitHub auth
-        let github_auth = Arc::new(GitHubAuth::new(metadata_db.clone()).await?);
+        let github_auth = GitHubAuth::new(metadata_db.clone()).await?;
 
         Ok(Self {
             engine,
             metadata_db,
-            component_cache: DashMap::new(),
             pre_cache: DashMap::new(),
             base_domain,
             functions_dir,
@@ -166,18 +147,8 @@ impl FaastaServer {
             self.pre_cache.remove(function_name);
             debug!("Removed function '{}' from component cache", function_name);
         }
-        if self.component_cache.contains_key(function_name) {
-            self.component_cache.remove(function_name);
-            debug!(
-                "Removed function '{}' from component type cache",
-                function_name
-            );
-        }
     }
-}
 
-// Implement request handling methods on RequestContext
-impl RequestContext {
     async fn handle_request(&self, req: Request<Incoming>) -> Result<Response<HyperOutgoingBody>> {
         // Extract function name from subdomain or path
         let host_header = req
@@ -305,10 +276,6 @@ impl RequestContext {
             redirect_to_website()
         }
     }
-}
-
-// Implement function execution methods on RequestContext
-impl RequestContext {
     async fn execute_function(
         &self,
         req: Request<Incoming>,
@@ -393,17 +360,37 @@ impl RequestContext {
         function_name: &str,
         function_path: &PathBuf,
     ) -> Result<ProxyPre<FaastaClientState>> {
+        use tracing::{debug, info};
+        use std::time::Instant;
+        
+        let start_time = Instant::now();
+        debug!("get_or_load_proxy_pre called for function: {}", function_name);
+        
         // First check if we have this pre-cached without cloning the key
         if let Some(cached) = self.pre_cache.get(function_name) {
+            let elapsed = start_time.elapsed();
+            info!(
+                "Proxy pre-cache hit for '{}', retrieved in {:?}",
+                function_name, elapsed
+            );
             return Ok(cached.value().clone());
         }
-
-        // Get the component, either from cache or newly loaded
+        
+        info!("Proxy pre-cache miss for '{}', loading from file", function_name);
+        let component_load_start = Instant::now();
+        
         // Load the component
         let component = Component::from_file(&self.engine, function_path)?;
+        let component_load_time = component_load_start.elapsed();
+        info!(
+            "Component loaded for '{}' in {:?}",
+            function_name, component_load_time
+        );
 
         // Get the shared linker or create it once
+        let linker_start = Instant::now();
         let linker = SHARED_LINKER.get_or_init(|| {
+            info!("Initializing shared linker (first time)");
             let mut linker = Linker::new(&self.engine);
 
             // Set up WASI and WASI-HTTP definitions - only needs to be done once
@@ -413,12 +400,29 @@ impl RequestContext {
 
             linker
         });
-
+        let linker_time = linker_start.elapsed();
+        if linker_time.as_millis() > 1 {
+            info!("Linker initialization took {:?}", linker_time);
+        }
+        
+        // Create the pre-instantiated component
+        let pre_start = Instant::now();
         let pre = ProxyPre::new(linker.instantiate_pre(&component)?)?;
+        let pre_time = pre_start.elapsed();
+        info!(
+            "ProxyPre created for '{}' in {:?}",
+            function_name, pre_time
+        );
 
         // Cache it for future use - only clone the string once when inserting
         self.pre_cache
             .insert(function_name.to_string(), pre.clone());
+        
+        let total_elapsed = start_time.elapsed();
+        info!(
+            "get_or_load_proxy_pre complete for '{}' in {:?} (cache miss)",
+            function_name, total_elapsed
+        );
 
         Ok(pre)
     }
@@ -500,30 +504,21 @@ async fn load_tls_config(args: &Args) -> Result<Arc<ServerConfig>> {
 }
 
 // Function to handle connections for tarpc
-async fn run_rpc_server(mut quic_server: s2n_quic::Server, server: Arc<FaastaServer>) {
+async fn run_rpc_server(mut quic_server: s2n_quic::Server) {
     while let Some(mut connection) = quic_server.accept().await {
         // Clone the server Arc once for each connection
-        let server_clone = server.clone();
 
         tokio::spawn(async move {
             debug!("Accepted new connection");
 
             while let Ok(Some(stream)) = connection.accept_bidirectional_stream().await {
-                // Create a new service for each stream using the connection's server_clone
-                let functions_dir = server_clone.functions_dir.clone();
-                let github_auth = server_clone.github_auth.clone();
-                let metadata_db = server_clone.metadata_db.clone();
 
                 tokio::spawn(async move {
                     debug!("Accepted new stream");
                     let framed = LengthDelimitedCodec::builder().new_framed(stream);
                     let transport = transport::new(framed, Bincode::default());
 
-                    let service = rpc_service::create_service_with_github_auth(
-                        functions_dir,
-                        github_auth,
-                        metadata_db,
-                    )
+                    let service = rpc_service::create_service()
                     .expect("Failed to create function service");
 
                     // Process this connection
@@ -635,11 +630,10 @@ async fn main() -> Result<()> {
             args.tls_key_path.clone(),
         );
 
-        // Obtain or renew certificate if needed
-        cert_manager
-            .obtain_or_renew_certificate()
-            .await
-            .context("Failed to obtain/renew TLS certificate")?;
+            cert_manager
+                .obtain_or_renew_certificate()
+                .await
+                .context("Failed to obtain/renew TLS certificate")?;
     }
 
     // Pre-compile available functions to improve startup time
@@ -690,14 +684,23 @@ async fn main() -> Result<()> {
     )?;
 
     // Open/create component cache database
-    let pre_cache = sled::open(&args.db_path)?;
+    let metadata_db = sled::open(&args.db_path)?;
     let mut config = Config::default();
     config.async_support(true);
     config.wasm_component_model(true);
     config.memory_init_cow(true);
+    let mut pool = PoolingAllocationConfig::new();
+    pool.total_memories(100);
+    pool.max_memory_size(1 << 31); // 2 GiB
+    pool.total_tables(100);
+    pool.table_elements(5000);
+    pool.total_core_instances(100);
+    config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
+
 
     // Enable module caching to speed up startup time
     config.cache_config_load_default()?;
+    // config.cac
 
     // Set compilation settings
     config.cranelift_opt_level(wasmtime::OptLevel::Speed);
@@ -717,24 +720,27 @@ async fn main() -> Result<()> {
     }
 
     // Create server
-    let server_instance = Arc::new(
+    let server_instance =
         FaastaServer::new(
             engine,
-            pre_cache,
+            metadata_db,
             args.base_domain.clone(),
             args.functions_path.clone(),
         )
-        .await?,
-    );
+        .await?;
 
     // Store server in global OnceCell for cache management
-    let _ = SERVER.set(server_instance.clone());
+    let _ = SERVER.set(server_instance);
 
-    // Spawn a background task to flush metrics to DB every hour
+    // Spawn a background task to flush metrics to DB
     metrics::spawn_periodic_flush(60 * 30);
 
-    // Load TLS configuration
+    // Load TLS configuration with timing
+    info!("Loading TLS configuration...");
+    let tls_timer = metrics::Timer::new("tls_config_loading".to_string());
     let tls_config = load_tls_config(&args).await?;
+    drop(tls_timer); // Explicitly drop to record timing
+    info!("TLS configuration loaded");
 
     let tls_acceptor = TlsAcceptor::from(tls_config.clone());
 
@@ -757,7 +763,6 @@ async fn main() -> Result<()> {
     info!("Listening on https://{}", args.listen_addr);
 
     // Start tarpc service for function management
-    let server_clone = server_instance.clone();
     tokio::spawn(async move {
         let addr = "0.0.0.0:4433".parse::<std::net::SocketAddr>().unwrap();
 
@@ -779,7 +784,7 @@ async fn main() -> Result<()> {
         info!("RPC service listening on {}", addr);
 
         // Process connections
-        run_rpc_server(quic_server, server_clone).await;
+        run_rpc_server(quic_server).await;
     });
     // Main server loop
     loop {
@@ -794,7 +799,6 @@ async fn main() -> Result<()> {
         info!("Accepted connection from {}", peer_addr);
 
         // Clone server and acceptor for this connection
-        let server = server_instance.clone();
         let tls_acceptor = tls_acceptor.clone();
 
         // Handle connection in a new task
@@ -804,18 +808,14 @@ async fn main() -> Result<()> {
                 Ok(tls_stream) => {
                     info!("TLS handshake successful with {}", peer_addr);
 
-                    // Create a lightweight request context once for this connection
-                    let context = server.get_request_context();
 
                     // Create a service function for handling HTTP requests
                     // Clone the context for each request to avoid lifetime issues
-                    let context_clone = context.clone();
                     let service = service_fn(move |req: Request<Incoming>| {
                         // Use the cloned context for each request
-                        let context = context_clone.clone();
 
                         async move {
-                            match context.handle_request(req).await {
+                            match SERVER.get().unwrap().handle_request(req).await {
                                 Ok(response) => Ok::<_, anyhow::Error>(response),
                                 Err(e) => {
                                     error!("Error handling request: {}", e);

@@ -8,7 +8,6 @@ use std::time::Duration;
 const USER_DB_TREE: &str = "user_data";
 const MAX_PROJECTS_PER_USER: usize = 10;
 
-/// Struct to hold GitHub auth configuration
 pub struct GitHubAuth {
     user_projects: DashMap<String, UserData>,
     db: sled::Db,
