@@ -8,6 +8,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{body::Incoming, header::HOST, Request, Response};
+use std::fs;
 mod cert_manager;
 mod github_auth;
 mod rpc_service;
@@ -121,7 +122,6 @@ pub struct FaastaServer {
 }
 
 impl FaastaServer {
-
     async fn new(
         engine: Engine,
         metadata_db: sled::Db,
@@ -181,7 +181,7 @@ impl FaastaServer {
                 );
 
                 // Use direct function name approach
-                let wasm_filename = format!("{}.wasm", function_name);
+                let wasm_filename = format!("{}.cwasm", function_name);
                 debug!("Looking for WASM file: {}", wasm_filename);
 
                 // Create a timer for this function call - will be moved to execute_function
@@ -257,7 +257,7 @@ impl FaastaServer {
             debug!("Processing subdomain request for function: {}", subdomain);
 
             // Use direct function name approach - only format once
-            let wasm_filename = format!("{}.wasm", subdomain);
+            let wasm_filename = format!("{}.cwasm", subdomain);
             debug!("Looking for WASM file: {}", wasm_filename);
 
             // Create a timer for this function call - will be moved to execute_function
@@ -360,12 +360,15 @@ impl FaastaServer {
         function_name: &str,
         function_path: &PathBuf,
     ) -> Result<ProxyPre<FaastaClientState>> {
-        use tracing::{debug, info};
         use std::time::Instant;
-        
+        use tracing::{debug, info};
+
         let start_time = Instant::now();
-        debug!("get_or_load_proxy_pre called for function: {}", function_name);
-        
+        debug!(
+            "get_or_load_proxy_pre called for function: {}",
+            function_name
+        );
+
         // First check if we have this pre-cached without cloning the key
         if let Some(cached) = self.pre_cache.get(function_name) {
             let elapsed = start_time.elapsed();
@@ -375,12 +378,15 @@ impl FaastaServer {
             );
             return Ok(cached.value().clone());
         }
-        
-        info!("Proxy pre-cache miss for '{}', loading from file", function_name);
+
+        info!(
+            "Proxy pre-cache miss for '{}', loading from file",
+            function_name
+        );
         let component_load_start = Instant::now();
-        
-        // Load the component
-        let component = Component::from_file(&self.engine, function_path)?;
+
+        let component = unsafe { Component::deserialize_file(&self.engine, function_path) }?;
+        // Component::from_file()
         let component_load_time = component_load_start.elapsed();
         info!(
             "Component loaded for '{}' in {:?}",
@@ -404,20 +410,17 @@ impl FaastaServer {
         if linker_time.as_millis() > 1 {
             info!("Linker initialization took {:?}", linker_time);
         }
-        
+
         // Create the pre-instantiated component
         let pre_start = Instant::now();
         let pre = ProxyPre::new(linker.instantiate_pre(&component)?)?;
         let pre_time = pre_start.elapsed();
-        info!(
-            "ProxyPre created for '{}' in {:?}",
-            function_name, pre_time
-        );
+        info!("ProxyPre created for '{}' in {:?}", function_name, pre_time);
 
         // Cache it for future use - only clone the string once when inserting
         self.pre_cache
             .insert(function_name.to_string(), pre.clone());
-        
+
         let total_elapsed = start_time.elapsed();
         info!(
             "get_or_load_proxy_pre complete for '{}' in {:?} (cache miss)",
@@ -512,14 +515,13 @@ async fn run_rpc_server(mut quic_server: s2n_quic::Server) {
             debug!("Accepted new connection");
 
             while let Ok(Some(stream)) = connection.accept_bidirectional_stream().await {
-
                 tokio::spawn(async move {
                     debug!("Accepted new stream");
                     let framed = LengthDelimitedCodec::builder().new_framed(stream);
                     let transport = transport::new(framed, Bincode::default());
 
-                    let service = rpc_service::create_service()
-                    .expect("Failed to create function service");
+                    let service =
+                        rpc_service::create_service().expect("Failed to create function service");
 
                     // Process this connection
                     // Use default configuration but with a longer context deadline
@@ -630,10 +632,10 @@ async fn main() -> Result<()> {
             args.tls_key_path.clone(),
         );
 
-            cert_manager
-                .obtain_or_renew_certificate()
-                .await
-                .context("Failed to obtain/renew TLS certificate")?;
+        cert_manager
+            .obtain_or_renew_certificate()
+            .await
+            .context("Failed to obtain/renew TLS certificate")?;
     }
 
     // Pre-compile available functions to improve startup time
@@ -659,7 +661,9 @@ async fn main() -> Result<()> {
         for path in function_files {
             let filename = path.file_name().unwrap().to_string_lossy();
             info!("Precompiling function: {}", filename);
-            let _ = Component::from_file(engine, &path)?;
+            let wasm = fs::read(&path).unwrap();
+            let cwasm = engine.precompile_component(&wasm).unwrap();
+            fs::write(path.with_extension("cwasm"), cwasm).unwrap();
         }
 
         info!("Precompilation complete");
@@ -697,10 +701,8 @@ async fn main() -> Result<()> {
     pool.total_core_instances(100);
     config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
 
-
     // Enable module caching to speed up startup time
     config.cache_config_load_default()?;
-    // config.cac
 
     // Set compilation settings
     config.cranelift_opt_level(wasmtime::OptLevel::Speed);
@@ -720,14 +722,13 @@ async fn main() -> Result<()> {
     }
 
     // Create server
-    let server_instance =
-        FaastaServer::new(
-            engine,
-            metadata_db,
-            args.base_domain.clone(),
-            args.functions_path.clone(),
-        )
-        .await?;
+    let server_instance = FaastaServer::new(
+        engine,
+        metadata_db,
+        args.base_domain.clone(),
+        args.functions_path.clone(),
+    )
+    .await?;
 
     // Store server in global OnceCell for cache management
     let _ = SERVER.set(server_instance);
@@ -807,7 +808,6 @@ async fn main() -> Result<()> {
             match tls_acceptor.accept(stream).await {
                 Ok(tls_stream) => {
                     info!("TLS handshake successful with {}", peer_addr);
-
 
                     // Create a service function for handling HTTP requests
                     // Clone the context for each request to avoid lifetime issues

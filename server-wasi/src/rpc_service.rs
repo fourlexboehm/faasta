@@ -1,11 +1,8 @@
-use crate::github_auth::GitHubAuth;
 use crate::metrics::get_metrics;
 use crate::SERVER;
 use faasta_interface::{FunctionError, FunctionInfo, FunctionResult, FunctionService, Metrics};
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
-use std::sync::Arc;
 use tracing::{debug, error, info};
 
 /// Sled tree name for function metadata
@@ -23,8 +20,7 @@ pub struct FunctionServiceImpl {
 impl FunctionServiceImpl {
     /// Create a new FunctionServiceImpl
     /// Create a new FunctionServiceImpl, loading persisted metadata from sled
-    pub fn new(
-    ) -> anyhow::Result<Self> {
+    pub fn new() -> anyhow::Result<Self> {
         // Ensure functions directory exists
         let server = SERVER.get().unwrap();
         if !server.functions_dir.exists() {
@@ -34,9 +30,7 @@ impl FunctionServiceImpl {
         // Open or create sled tree for function metadata
         let functions_tree = server.metadata_db.open_tree(FUNCTIONS_DB_TREE)?;
 
-        Ok(Self {
-            functions_tree,
-        })
+        Ok(Self { functions_tree })
     }
 }
 
@@ -153,6 +147,15 @@ impl FunctionServiceImpl {
             .map_err(|e| FunctionError::InternalError(format!("Failed to create file: {}", e)))?;
         file.write_all(&wasm_file)
             .map_err(|e| FunctionError::InternalError(format!("Failed to write file: {}", e)))?;
+        let wasm = fs::read(&wasm_path).unwrap();
+        
+        // Fix: properly handle the Result to avoid passing it directly to fs::write
+        let cwasm = server
+            .engine
+            .precompile_component(&wasm)
+            .map_err(|_| FunctionError::InvalidInput("Invalid Wasm".to_string()))?;
+        
+        fs::write(wasm_path.with_extension("cwasm"), cwasm).unwrap();
 
         // Create function info with both subdomain and path-based URLs
         let now = chrono::Utc::now().to_rfc3339();
@@ -295,6 +298,14 @@ impl FunctionServiceImpl {
                     debug!("Successfully removed WASM file for function '{}'", name);
                 }
             }
+            let cwasm_path = wasm_path.with_extension("cwasm");
+            if cwasm_path.exists() {
+                if let Err(e) = fs::remove_file(&cwasm_path) {
+                    error!("Failed to remove CWASM file: {}", e);
+                } else {
+                    debug!("Successfully removed CWASM file for function '{}'", name);
+                }
+            }
 
             // Remove metadata from sled
             match self.functions_tree.remove(name.as_bytes()) {
@@ -392,12 +403,12 @@ impl FunctionService for FunctionServiceImpl {
 pub fn create_service() -> anyhow::Result<FunctionServiceImpl> {
     use crate::metrics::Timer;
     use tracing::info;
-    
+
     info!("Initializing RPC service...");
     let rpc_init_timer = Timer::new("rpc_service_initialization".to_string());
     let service = FunctionServiceImpl::new()?;
     drop(rpc_init_timer); // Explicitly drop to record timing
     info!("RPC service initialization complete");
-    
+
     Ok(service)
 }

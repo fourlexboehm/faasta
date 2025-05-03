@@ -300,7 +300,10 @@ pub async fn handle_run(port: u16) -> io::Result<()> {
 
     // Ensure the WASM file exists
     if !wasm_path.exists() {
-        eprintln!("Error: Could not find compiled WASM at: {}", wasm_path.display());
+        eprintln!(
+            "Error: Could not find compiled WASM at: {}",
+            wasm_path.display()
+        );
         eprintln!("Build seems to have failed or produced output in a different location.");
         exit(1);
     }
