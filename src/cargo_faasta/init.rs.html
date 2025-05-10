@@ -81,7 +81,7 @@
 <a href=#81 id=81 data-nosnippet>81</a>        }
 <a href=#82 id=82 data-nosnippet>82</a>
 <a href=#83 id=83 data-nosnippet>83</a>        <span class="kw">if </span>in_package &amp;&amp; trimmed.starts_with(<span class="string">"name ="</span>) {
-<a href=#84 id=84 data-nosnippet>84</a>            output.push_str(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"name = \"{}\"\n"</span>, package_name));
+<a href=#84 id=84 data-nosnippet>84</a>            output.push_str(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"name = \"{package_name}\"\n"</span>));
 <a href=#85 id=85 data-nosnippet>85</a>            in_package = <span class="bool-val">false</span>; <span class="comment">// Only replace once
 <a href=#86 id=86 data-nosnippet>86</a>            </span><span class="kw">continue</span>;
 <a href=#87 id=87 data-nosnippet>87</a>        }

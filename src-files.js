@@ -1,3 +1,3 @@
-var srcIndex = new Map(JSON.parse('[["cargo_faasta",["",[],["auth.rs","github_oauth.rs","init.rs","lib.rs","run.rs"]]],["faasta_interface",["",[],["lib.rs"]]],["server_wasi",["",[],["cert_manager.rs","github_auth.rs","main.rs","metrics.rs","rpc_service.rs"]]]]'));
+var srcIndex = new Map(JSON.parse('[["cargo_faasta",["",[],["auth.rs","github_oauth.rs","init.rs","lib.rs","run.rs"]]],["faasta_interface",["",[],["lib.rs"]]],["server_wasi",["",[["http",[],["mod.rs"]],["quic",[],["mod.rs"]],["wasi_server",[],["mod.rs"]]],["cert_manager.rs","github_auth.rs","main.rs","metrics.rs","rpc_service.rs"]]]]'));
 createSrcSidebar();
-//{"start":36,"fragment_lengths":[82,40,101]}
+//{"start":36,"fragment_lengths":[82,40,176]}

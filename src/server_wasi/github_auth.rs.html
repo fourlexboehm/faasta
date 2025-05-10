@@ -67,7 +67,7 @@
 <a href=#67 id=67 data-nosnippet>67</a>        </span><span class="kw">let </span>response = <span class="kw">match </span>client
 <a href=#68 id=68 data-nosnippet>68</a>            .get(<span class="string">"https://api.github.com/user"</span>)
 <a href=#69 id=69 data-nosnippet>69</a>            .header(<span class="string">"User-Agent"</span>, <span class="string">"faasta-server"</span>)
-<a href=#70 id=70 data-nosnippet>70</a>            .header(<span class="string">"Authorization"</span>, <span class="macro">format!</span>(<span class="string">"Bearer {}"</span>, token_value))
+<a href=#70 id=70 data-nosnippet>70</a>            .header(<span class="string">"Authorization"</span>, <span class="macro">format!</span>(<span class="string">"Bearer {token_value}"</span>))
 <a href=#71 id=71 data-nosnippet>71</a>            .send()
 <a href=#72 id=72 data-nosnippet>72</a>            .<span class="kw">await
 <a href=#73 id=73 data-nosnippet>73</a>        </span>{

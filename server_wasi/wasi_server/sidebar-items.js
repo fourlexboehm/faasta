@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["redirect_to_website","text_response"],"static":["SERVER","SHARED_LINKER","STORE_TEMPLATE_CTX"],"struct":["FaastaClientState","FaastaServer"]};

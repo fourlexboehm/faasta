@@ -195,11 +195,11 @@
 <a href=#195 id=195 data-nosnippet>195</a>        }
 <a href=#196 id=196 data-nosnippet>196</a>
 <a href=#197 id=197 data-nosnippet>197</a>        <span class="comment">// Save the WASM file
-<a href=#198 id=198 data-nosnippet>198</a>        </span><span class="kw">let </span>wasm_path = <span class="self">self</span>.functions_dir.join(<span class="macro">format!</span>(<span class="string">"{}.wasm"</span>, name));
+<a href=#198 id=198 data-nosnippet>198</a>        </span><span class="kw">let </span>wasm_path = <span class="self">self</span>.functions_dir.join(<span class="macro">format!</span>(<span class="string">"{name}.wasm"</span>));
 <a href=#199 id=199 data-nosnippet>199</a>        <span class="kw">let </span><span class="kw-2">mut </span>file = fs::File::create(<span class="kw-2">&amp;</span>wasm_path)
-<a href=#200 id=200 data-nosnippet>200</a>            .map_err(|e| FunctionError::InternalError(<span class="macro">format!</span>(<span class="string">"Failed to create file: {}"</span>, e)))<span class="question-mark">?</span>;
+<a href=#200 id=200 data-nosnippet>200</a>            .map_err(|e| FunctionError::InternalError(<span class="macro">format!</span>(<span class="string">"Failed to create file: {e}"</span>)))<span class="question-mark">?</span>;
 <a href=#201 id=201 data-nosnippet>201</a>        file.write_all(<span class="kw-2">&amp;</span>wasm_file)
-<a href=#202 id=202 data-nosnippet>202</a>            .map_err(|e| FunctionError::InternalError(<span class="macro">format!</span>(<span class="string">"Failed to write file: {}"</span>, e)))<span class="question-mark">?</span>;
+<a href=#202 id=202 data-nosnippet>202</a>            .map_err(|e| FunctionError::InternalError(<span class="macro">format!</span>(<span class="string">"Failed to write file: {e}"</span>)))<span class="question-mark">?</span>;
 <a href=#203 id=203 data-nosnippet>203</a>
 <a href=#204 id=204 data-nosnippet>204</a>        <span class="comment">// Create function info
 <a href=#205 id=205 data-nosnippet>205</a>        </span><span class="kw">let </span>now = chrono::Utc::now().to_rfc3339();
@@ -207,7 +207,7 @@
 <a href=#207 id=207 data-nosnippet>207</a>            name: name.clone(),
 <a href=#208 id=208 data-nosnippet>208</a>            owner: username,
 <a href=#209 id=209 data-nosnippet>209</a>            published_at: now,
-<a href=#210 id=210 data-nosnippet>210</a>            usage: <span class="macro">format!</span>(<span class="string">"https://faasta.xyz/{}"</span>, name),
+<a href=#210 id=210 data-nosnippet>210</a>            usage: <span class="macro">format!</span>(<span class="string">"https://faasta.xyz/{name}"</span>),
 <a href=#211 id=211 data-nosnippet>211</a>        };
 <a href=#212 id=212 data-nosnippet>212</a>
 <a href=#213 id=213 data-nosnippet>213</a>        <span class="comment">// Save function metadata
@@ -216,7 +216,7 @@
 <a href=#216 id=216 data-nosnippet>216</a>
 <a href=#217 id=217 data-nosnippet>217</a>        <span class="comment">// TODO: Save metadata to a file or database
 <a href=#218 id=218 data-nosnippet>218</a>
-<a href=#219 id=219 data-nosnippet>219</a>        </span><span class="prelude-val">Ok</span>(<span class="macro">format!</span>(<span class="string">"Function '{}' published successfully"</span>, name))
+<a href=#219 id=219 data-nosnippet>219</a>        </span><span class="prelude-val">Ok</span>(<span class="macro">format!</span>(<span class="string">"Function '{name}' published successfully"</span>))
 <a href=#220 id=220 data-nosnippet>220</a>    }
 <a href=#221 id=221 data-nosnippet>221</a>
 <a href=#222 id=222 data-nosnippet>222</a>    <span class="kw">async fn </span>list_functions(
@@ -282,10 +282,10 @@
 <a href=#282 id=282 data-nosnippet>282</a>            </span><span class="self">self</span>.functions_db.remove(<span class="kw-2">&amp;</span>name);
 <a href=#283 id=283 data-nosnippet>283</a>
 <a href=#284 id=284 data-nosnippet>284</a>            <span class="comment">// Remove WASM file
-<a href=#285 id=285 data-nosnippet>285</a>            </span><span class="kw">let </span>wasm_path = <span class="self">self</span>.functions_dir.join(<span class="macro">format!</span>(<span class="string">"{}.wasm"</span>, name));
+<a href=#285 id=285 data-nosnippet>285</a>            </span><span class="kw">let </span>wasm_path = <span class="self">self</span>.functions_dir.join(<span class="macro">format!</span>(<span class="string">"{name}.wasm"</span>));
 <a href=#286 id=286 data-nosnippet>286</a>            <span class="kw">if </span>wasm_path.exists() {
 <a href=#287 id=287 data-nosnippet>287</a>                fs::remove_file(wasm_path).map_err(|e| {
-<a href=#288 id=288 data-nosnippet>288</a>                    FunctionError::InternalError(<span class="macro">format!</span>(<span class="string">"Failed to remove file: {}"</span>, e))
+<a href=#288 id=288 data-nosnippet>288</a>                    FunctionError::InternalError(<span class="macro">format!</span>(<span class="string">"Failed to remove file: {e}"</span>))
 <a href=#289 id=289 data-nosnippet>289</a>                })<span class="question-mark">?</span>;
 <a href=#290 id=290 data-nosnippet>290</a>            }
 <a href=#291 id=291 data-nosnippet>291</a>
@@ -294,69 +294,68 @@
 <a href=#294 id=294 data-nosnippet>294</a>            </span><span class="prelude-val">Ok</span>(())
 <a href=#295 id=295 data-nosnippet>295</a>        } <span class="kw">else </span>{
 <a href=#296 id=296 data-nosnippet>296</a>            <span class="prelude-val">Err</span>(FunctionError::NotFound(<span class="macro">format!</span>(
-<a href=#297 id=297 data-nosnippet>297</a>                <span class="string">"Function '{}' not found"</span>,
-<a href=#298 id=298 data-nosnippet>298</a>                name
-<a href=#299 id=299 data-nosnippet>299</a>            )))
-<a href=#300 id=300 data-nosnippet>300</a>        }
-<a href=#301 id=301 data-nosnippet>301</a>    }
-<a href=#302 id=302 data-nosnippet>302</a>
-<a href=#303 id=303 data-nosnippet>303</a>    <span class="kw">async fn </span>get_metrics(
-<a href=#304 id=304 data-nosnippet>304</a>        <span class="self">self</span>,
-<a href=#305 id=305 data-nosnippet>305</a>        <span class="kw">_</span>: tarpc::context::Context,
-<a href=#306 id=306 data-nosnippet>306</a>        github_auth_token: String,
-<a href=#307 id=307 data-nosnippet>307</a>    ) -&gt; FunctionResult&lt;Metrics&gt; {
-<a href=#308 id=308 data-nosnippet>308</a>        <span class="comment">// Extract username from token
-<a href=#309 id=309 data-nosnippet>309</a>        </span><span class="kw">let </span>username = <span class="self">self</span>.get_username_from_token(<span class="kw-2">&amp;</span>github_auth_token).<span class="kw">await</span><span class="question-mark">?</span>;
-<a href=#310 id=310 data-nosnippet>310</a>
-<a href=#311 id=311 data-nosnippet>311</a>        <span class="comment">// Validate token
-<a href=#312 id=312 data-nosnippet>312</a>        </span><span class="kw">if </span>!<span class="self">self
-<a href=#313 id=313 data-nosnippet>313</a>            </span>.validate_auth(<span class="kw-2">&amp;</span>username, <span class="kw-2">&amp;</span>github_auth_token)
-<a href=#314 id=314 data-nosnippet>314</a>            .<span class="kw">await
-<a href=#315 id=315 data-nosnippet>315</a>            </span>.map_err(|e| FunctionError::AuthError(e.to_string()))<span class="question-mark">?
-<a href=#316 id=316 data-nosnippet>316</a>        </span>{
-<a href=#317 id=317 data-nosnippet>317</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(FunctionError::AuthError(
-<a href=#318 id=318 data-nosnippet>318</a>                <span class="string">"Invalid GitHub authentication token"</span>.to_string(),
-<a href=#319 id=319 data-nosnippet>319</a>            ));
-<a href=#320 id=320 data-nosnippet>320</a>        }
-<a href=#321 id=321 data-nosnippet>321</a>
-<a href=#322 id=322 data-nosnippet>322</a>        <span class="comment">// Collect metrics from all functions
-<a href=#323 id=323 data-nosnippet>323</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>function_metrics = Vec::new();
-<a href=#324 id=324 data-nosnippet>324</a>        <span class="kw">let </span><span class="kw-2">mut </span>total_time = <span class="number">0</span>;
-<a href=#325 id=325 data-nosnippet>325</a>        <span class="kw">let </span><span class="kw-2">mut </span>total_calls = <span class="number">0</span>;
-<a href=#326 id=326 data-nosnippet>326</a>
-<a href=#327 id=327 data-nosnippet>327</a>        <span class="kw">for </span>entry <span class="kw">in </span><span class="self">self</span>.metrics_db.iter() {
-<a href=#328 id=328 data-nosnippet>328</a>            <span class="kw">let </span>function_name = entry.key().clone();
-<a href=#329 id=329 data-nosnippet>329</a>            <span class="kw">let </span>(time, calls, last_called) = <span class="kw-2">*</span>entry.value();
-<a href=#330 id=330 data-nosnippet>330</a>
-<a href=#331 id=331 data-nosnippet>331</a>            <span class="comment">// Convert timestamp to ISO string
-<a href=#332 id=332 data-nosnippet>332</a>            </span><span class="kw">let </span>_last_called_time = UNIX_EPOCH + Duration::from_millis(last_called);
-<a href=#333 id=333 data-nosnippet>333</a>            <span class="kw">let </span>last_called_str = chrono::Utc::now().to_rfc3339(); <span class="comment">// Placeholder, should use actual timestamp
-<a href=#334 id=334 data-nosnippet>334</a>
-<a href=#335 id=335 data-nosnippet>335</a>            </span>function_metrics.push(FunctionMetricsResponse {
-<a href=#336 id=336 data-nosnippet>336</a>                function_name,
-<a href=#337 id=337 data-nosnippet>337</a>                total_time_millis: time,
-<a href=#338 id=338 data-nosnippet>338</a>                call_count: calls,
-<a href=#339 id=339 data-nosnippet>339</a>                last_called: last_called_str,
-<a href=#340 id=340 data-nosnippet>340</a>            });
-<a href=#341 id=341 data-nosnippet>341</a>
-<a href=#342 id=342 data-nosnippet>342</a>            total_time += time;
-<a href=#343 id=343 data-nosnippet>343</a>            total_calls += calls;
-<a href=#344 id=344 data-nosnippet>344</a>        }
-<a href=#345 id=345 data-nosnippet>345</a>
-<a href=#346 id=346 data-nosnippet>346</a>        <span class="prelude-val">Ok</span>(Metrics {
-<a href=#347 id=347 data-nosnippet>347</a>            total_time,
-<a href=#348 id=348 data-nosnippet>348</a>            total_calls,
-<a href=#349 id=349 data-nosnippet>349</a>            function_metrics,
-<a href=#350 id=350 data-nosnippet>350</a>        })
-<a href=#351 id=351 data-nosnippet>351</a>    }
-<a href=#352 id=352 data-nosnippet>352</a>}
-<a href=#353 id=353 data-nosnippet>353</a>
-<a href=#354 id=354 data-nosnippet>354</a><span class="doccomment">/// Helper function to create a service implementation with GitHub auth
-<a href=#355 id=355 data-nosnippet>355</a></span><span class="kw">pub fn </span>create_service_with_github_auth(
-<a href=#356 id=356 data-nosnippet>356</a>    functions_dir: PathBuf,
-<a href=#357 id=357 data-nosnippet>357</a>    github_auth: Arc&lt;<span class="kw">impl </span>Fn(<span class="kw-2">&amp;</span>str, <span class="kw-2">&amp;</span>str) -&gt; anyhow::Result&lt;bool&gt; + Send + Sync + <span class="lifetime">'static</span>&gt;,
-<a href=#358 id=358 data-nosnippet>358</a>) -&gt; anyhow::Result&lt;FunctionServiceImpl&gt; {
-<a href=#359 id=359 data-nosnippet>359</a>    FunctionServiceImpl::new(functions_dir, <span class="kw">move </span>|username, token| {
-<a href=#360 id=360 data-nosnippet>360</a>        github_auth(username, token)
-<a href=#361 id=361 data-nosnippet>361</a>    })
-<a href=#362 id=362 data-nosnippet>362</a>}</code></pre></div></section></main></body></html>
+<a href=#297 id=297 data-nosnippet>297</a>                <span class="string">"Function '{name}' not found"
+<a href=#298 id=298 data-nosnippet>298</a>            </span>)))
+<a href=#299 id=299 data-nosnippet>299</a>        }
+<a href=#300 id=300 data-nosnippet>300</a>    }
+<a href=#301 id=301 data-nosnippet>301</a>
+<a href=#302 id=302 data-nosnippet>302</a>    <span class="kw">async fn </span>get_metrics(
+<a href=#303 id=303 data-nosnippet>303</a>        <span class="self">self</span>,
+<a href=#304 id=304 data-nosnippet>304</a>        <span class="kw">_</span>: tarpc::context::Context,
+<a href=#305 id=305 data-nosnippet>305</a>        github_auth_token: String,
+<a href=#306 id=306 data-nosnippet>306</a>    ) -&gt; FunctionResult&lt;Metrics&gt; {
+<a href=#307 id=307 data-nosnippet>307</a>        <span class="comment">// Extract username from token
+<a href=#308 id=308 data-nosnippet>308</a>        </span><span class="kw">let </span>username = <span class="self">self</span>.get_username_from_token(<span class="kw-2">&amp;</span>github_auth_token).<span class="kw">await</span><span class="question-mark">?</span>;
+<a href=#309 id=309 data-nosnippet>309</a>
+<a href=#310 id=310 data-nosnippet>310</a>        <span class="comment">// Validate token
+<a href=#311 id=311 data-nosnippet>311</a>        </span><span class="kw">if </span>!<span class="self">self
+<a href=#312 id=312 data-nosnippet>312</a>            </span>.validate_auth(<span class="kw-2">&amp;</span>username, <span class="kw-2">&amp;</span>github_auth_token)
+<a href=#313 id=313 data-nosnippet>313</a>            .<span class="kw">await
+<a href=#314 id=314 data-nosnippet>314</a>            </span>.map_err(|e| FunctionError::AuthError(e.to_string()))<span class="question-mark">?
+<a href=#315 id=315 data-nosnippet>315</a>        </span>{
+<a href=#316 id=316 data-nosnippet>316</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(FunctionError::AuthError(
+<a href=#317 id=317 data-nosnippet>317</a>                <span class="string">"Invalid GitHub authentication token"</span>.to_string(),
+<a href=#318 id=318 data-nosnippet>318</a>            ));
+<a href=#319 id=319 data-nosnippet>319</a>        }
+<a href=#320 id=320 data-nosnippet>320</a>
+<a href=#321 id=321 data-nosnippet>321</a>        <span class="comment">// Collect metrics from all functions
+<a href=#322 id=322 data-nosnippet>322</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>function_metrics = Vec::new();
+<a href=#323 id=323 data-nosnippet>323</a>        <span class="kw">let </span><span class="kw-2">mut </span>total_time = <span class="number">0</span>;
+<a href=#324 id=324 data-nosnippet>324</a>        <span class="kw">let </span><span class="kw-2">mut </span>total_calls = <span class="number">0</span>;
+<a href=#325 id=325 data-nosnippet>325</a>
+<a href=#326 id=326 data-nosnippet>326</a>        <span class="kw">for </span>entry <span class="kw">in </span><span class="self">self</span>.metrics_db.iter() {
+<a href=#327 id=327 data-nosnippet>327</a>            <span class="kw">let </span>function_name = entry.key().clone();
+<a href=#328 id=328 data-nosnippet>328</a>            <span class="kw">let </span>(time, calls, last_called) = <span class="kw-2">*</span>entry.value();
+<a href=#329 id=329 data-nosnippet>329</a>
+<a href=#330 id=330 data-nosnippet>330</a>            <span class="comment">// Convert timestamp to ISO string
+<a href=#331 id=331 data-nosnippet>331</a>            </span><span class="kw">let </span>_last_called_time = UNIX_EPOCH + Duration::from_millis(last_called);
+<a href=#332 id=332 data-nosnippet>332</a>            <span class="kw">let </span>last_called_str = chrono::Utc::now().to_rfc3339(); <span class="comment">// Placeholder, should use actual timestamp
+<a href=#333 id=333 data-nosnippet>333</a>
+<a href=#334 id=334 data-nosnippet>334</a>            </span>function_metrics.push(FunctionMetricsResponse {
+<a href=#335 id=335 data-nosnippet>335</a>                function_name,
+<a href=#336 id=336 data-nosnippet>336</a>                total_time_millis: time,
+<a href=#337 id=337 data-nosnippet>337</a>                call_count: calls,
+<a href=#338 id=338 data-nosnippet>338</a>                last_called: last_called_str,
+<a href=#339 id=339 data-nosnippet>339</a>            });
+<a href=#340 id=340 data-nosnippet>340</a>
+<a href=#341 id=341 data-nosnippet>341</a>            total_time += time;
+<a href=#342 id=342 data-nosnippet>342</a>            total_calls += calls;
+<a href=#343 id=343 data-nosnippet>343</a>        }
+<a href=#344 id=344 data-nosnippet>344</a>
+<a href=#345 id=345 data-nosnippet>345</a>        <span class="prelude-val">Ok</span>(Metrics {
+<a href=#346 id=346 data-nosnippet>346</a>            total_time,
+<a href=#347 id=347 data-nosnippet>347</a>            total_calls,
+<a href=#348 id=348 data-nosnippet>348</a>            function_metrics,
+<a href=#349 id=349 data-nosnippet>349</a>        })
+<a href=#350 id=350 data-nosnippet>350</a>    }
+<a href=#351 id=351 data-nosnippet>351</a>}
+<a href=#352 id=352 data-nosnippet>352</a>
+<a href=#353 id=353 data-nosnippet>353</a><span class="doccomment">/// Helper function to create a service implementation with GitHub auth
+<a href=#354 id=354 data-nosnippet>354</a></span><span class="kw">pub fn </span>create_service_with_github_auth(
+<a href=#355 id=355 data-nosnippet>355</a>    functions_dir: PathBuf,
+<a href=#356 id=356 data-nosnippet>356</a>    github_auth: Arc&lt;<span class="kw">impl </span>Fn(<span class="kw-2">&amp;</span>str, <span class="kw-2">&amp;</span>str) -&gt; anyhow::Result&lt;bool&gt; + Send + Sync + <span class="lifetime">'static</span>&gt;,
+<a href=#357 id=357 data-nosnippet>357</a>) -&gt; anyhow::Result&lt;FunctionServiceImpl&gt; {
+<a href=#358 id=358 data-nosnippet>358</a>    FunctionServiceImpl::new(functions_dir, <span class="kw">move </span>|username, token| {
+<a href=#359 id=359 data-nosnippet>359</a>        github_auth(username, token)
+<a href=#360 id=360 data-nosnippet>360</a>    })
+<a href=#361 id=361 data-nosnippet>361</a>}</code></pre></div></section></main></body></html>

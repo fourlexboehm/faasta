@@ -90,12 +90,12 @@
 <a href=#90 id=90 data-nosnippet>90</a>
 <a href=#91 id=91 data-nosnippet>91</a>            <span class="comment">// For localhost, use 127.0.0.1
 <a href=#92 id=92 data-nosnippet>92</a>            </span><span class="kw">if </span>hostname == <span class="string">"localhost" </span>|| hostname == <span class="string">"localhost.localdomain" </span>{
-<a href=#93 id=93 data-nosnippet>93</a>                <span class="macro">format!</span>(<span class="string">"127.0.0.1:{}"</span>, port)
+<a href=#93 id=93 data-nosnippet>93</a>                <span class="macro">format!</span>(<span class="string">"127.0.0.1:{port}"</span>)
 <a href=#94 id=94 data-nosnippet>94</a>                    .parse()
 <a href=#95 id=95 data-nosnippet>95</a>                    .context(<span class="string">"Failed to parse localhost address"</span>)<span class="question-mark">?
 <a href=#96 id=96 data-nosnippet>96</a>            </span>} <span class="kw">else </span>{
 <a href=#97 id=97 data-nosnippet>97</a>                <span class="comment">// For other hostnames, try to resolve using DNS
-<a href=#98 id=98 data-nosnippet>98</a>                </span><span class="kw">match </span>tokio::net::lookup_host(<span class="macro">format!</span>(<span class="string">"{}:{}"</span>, hostname, port)).<span class="kw">await </span>{
+<a href=#98 id=98 data-nosnippet>98</a>                </span><span class="kw">match </span>tokio::net::lookup_host(<span class="macro">format!</span>(<span class="string">"{hostname}:{port}"</span>)).<span class="kw">await </span>{
 <a href=#99 id=99 data-nosnippet>99</a>                    <span class="prelude-val">Ok</span>(<span class="kw-2">mut </span>addrs) =&gt; {
 <a href=#100 id=100 data-nosnippet>100</a>                        <span class="comment">// Take the first resolved address
 <a href=#101 id=101 data-nosnippet>101</a>                        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(addr) = addrs.next() {
@@ -175,7 +175,7 @@
 <a href=#175 id=175 data-nosnippet>175</a>        .output()
 <a href=#176 id=176 data-nosnippet>176</a>        .unwrap_or_else(|e| {
 <a href=#177 id=177 data-nosnippet>177</a>            spinner.finish_and_clear();
-<a href=#178 id=178 data-nosnippet>178</a>            <span class="macro">eprintln!</span>(<span class="string">"Failed to run cargo metadata: {}"</span>, e);
+<a href=#178 id=178 data-nosnippet>178</a>            <span class="macro">eprintln!</span>(<span class="string">"Failed to run cargo metadata: {e}"</span>);
 <a href=#179 id=179 data-nosnippet>179</a>            exit(<span class="number">1</span>);
 <a href=#180 id=180 data-nosnippet>180</a>        });
 <a href=#181 id=181 data-nosnippet>181</a>
@@ -188,7 +188,7 @@
 <a href=#188 id=188 data-nosnippet>188</a>    <span class="comment">// Parse JSON
 <a href=#189 id=189 data-nosnippet>189</a>    </span><span class="kw">let </span>metadata: serde_json::Value = serde_json::from_slice(<span class="kw-2">&amp;</span>output.stdout).unwrap_or_else(|e| {
 <a href=#190 id=190 data-nosnippet>190</a>        spinner.finish_and_clear();
-<a href=#191 id=191 data-nosnippet>191</a>        <span class="macro">eprintln!</span>(<span class="string">"Failed to parse cargo metadata: {}"</span>, e);
+<a href=#191 id=191 data-nosnippet>191</a>        <span class="macro">eprintln!</span>(<span class="string">"Failed to parse cargo metadata: {e}"</span>);
 <a href=#192 id=192 data-nosnippet>192</a>        exit(<span class="number">1</span>);
 <a href=#193 id=193 data-nosnippet>193</a>    });
 <a href=#194 id=194 data-nosnippet>194</a>
@@ -216,7 +216,7 @@
 <a href=#216 id=216 data-nosnippet>216</a>    <span class="comment">// Find the package for the current directory
 <a href=#217 id=217 data-nosnippet>217</a>    </span><span class="kw">let </span>current_dir = std::env::current_dir().unwrap_or_else(|e| {
 <a href=#218 id=218 data-nosnippet>218</a>        spinner.finish_and_clear();
-<a href=#219 id=219 data-nosnippet>219</a>        <span class="macro">eprintln!</span>(<span class="string">"Failed to get current directory: {}"</span>, e);
+<a href=#219 id=219 data-nosnippet>219</a>        <span class="macro">eprintln!</span>(<span class="string">"Failed to get current directory: {e}"</span>);
 <a href=#220 id=220 data-nosnippet>220</a>        exit(<span class="number">1</span>);
 <a href=#221 id=221 data-nosnippet>221</a>    });
 <a href=#222 id=222 data-nosnippet>222</a>
@@ -263,7 +263,7 @@
 <a href=#263 id=263 data-nosnippet>263</a>        .status()
 <a href=#264 id=264 data-nosnippet>264</a>        .unwrap_or_else(|e| {
 <a href=#265 id=265 data-nosnippet>265</a>            spinner.finish_and_clear();
-<a href=#266 id=266 data-nosnippet>266</a>            <span class="macro">eprintln!</span>(<span class="string">"Failed to run cargo build: {}"</span>, e);
+<a href=#266 id=266 data-nosnippet>266</a>            <span class="macro">eprintln!</span>(<span class="string">"Failed to run cargo build: {e}"</span>);
 <a href=#267 id=267 data-nosnippet>267</a>            exit(<span class="number">1</span>);
 <a href=#268 id=268 data-nosnippet>268</a>        });
 <a href=#269 id=269 data-nosnippet>269</a>
@@ -284,7 +284,7 @@
 <a href=#284 id=284 data-nosnippet>284</a>    </span><span class="kw">let </span>(target_directory, package_name, package_root) = get_project_info()<span class="question-mark">?</span>;
 <a href=#285 id=285 data-nosnippet>285</a>
 <a href=#286 id=286 data-nosnippet>286</a>    <span class="comment">// Display project info
-<a href=#287 id=287 data-nosnippet>287</a>    </span><span class="macro">println!</span>(<span class="string">"Building project: {}"</span>, package_name);
+<a href=#287 id=287 data-nosnippet>287</a>    </span><span class="macro">println!</span>(<span class="string">"Building project: {package_name}"</span>);
 <a href=#288 id=288 data-nosnippet>288</a>    <span class="macro">println!</span>(<span class="string">"Project root: {}"</span>, package_root.display());
 <a href=#289 id=289 data-nosnippet>289</a>
 <a href=#290 id=290 data-nosnippet>290</a>    <span class="comment">// Build the project first
@@ -292,7 +292,7 @@
 <a href=#292 id=292 data-nosnippet>292</a>
 <a href=#293 id=293 data-nosnippet>293</a>    <span class="comment">// Get the full WASM file path - use same logic as in deploy
 <a href=#294 id=294 data-nosnippet>294</a>    </span><span class="kw">let </span>rust_compiled_name = package_name.replace(<span class="string">'-'</span>, <span class="string">"_"</span>);
-<a href=#295 id=295 data-nosnippet>295</a>    <span class="kw">let </span>wasm_filename = <span class="macro">format!</span>(<span class="string">"{}.wasm"</span>, rust_compiled_name);
+<a href=#295 id=295 data-nosnippet>295</a>    <span class="kw">let </span>wasm_filename = <span class="macro">format!</span>(<span class="string">"{rust_compiled_name}.wasm"</span>);
 <a href=#296 id=296 data-nosnippet>296</a>    <span class="kw">let </span>wasm_path = target_directory
 <a href=#297 id=297 data-nosnippet>297</a>        .join(<span class="string">"wasm32-wasip2"</span>)
 <a href=#298 id=298 data-nosnippet>298</a>        .join(<span class="string">"release"</span>)
@@ -308,13 +308,13 @@
 <a href=#308 id=308 data-nosnippet>308</a>        exit(<span class="number">1</span>);
 <a href=#309 id=309 data-nosnippet>309</a>    }
 <a href=#310 id=310 data-nosnippet>310</a>
-<a href=#311 id=311 data-nosnippet>311</a>    <span class="macro">println!</span>(<span class="string">"Starting local server on port {}..."</span>, port);
+<a href=#311 id=311 data-nosnippet>311</a>    <span class="macro">println!</span>(<span class="string">"Starting local server on port {port}..."</span>);
 <a href=#312 id=312 data-nosnippet>312</a>    <span class="kw">let </span>status = std::process::Command::new(<span class="string">"wasmtime"</span>)
 <a href=#313 id=313 data-nosnippet>313</a>        .args([<span class="string">"serve"</span>, <span class="kw-2">&amp;</span>wasm_path.to_string_lossy()])
 <a href=#314 id=314 data-nosnippet>314</a>        .current_dir(<span class="kw-2">&amp;</span>package_root)
 <a href=#315 id=315 data-nosnippet>315</a>        .status()
 <a href=#316 id=316 data-nosnippet>316</a>        .unwrap_or_else(|e| {
-<a href=#317 id=317 data-nosnippet>317</a>            <span class="macro">eprintln!</span>(<span class="string">"Failed to run wasmtime serve: {}"</span>, e);
+<a href=#317 id=317 data-nosnippet>317</a>            <span class="macro">eprintln!</span>(<span class="string">"Failed to run wasmtime serve: {e}"</span>);
 <a href=#318 id=318 data-nosnippet>318</a>            exit(<span class="number">1</span>);
 <a href=#319 id=319 data-nosnippet>319</a>        });
 <a href=#320 id=320 data-nosnippet>320</a>

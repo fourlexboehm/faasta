@@ -178,7 +178,7 @@
 <a href=#178 id=178 data-nosnippet>178</a>
 <a href=#179 id=179 data-nosnippet>179</a>        <span class="comment">// Parse the response
 <a href=#180 id=180 data-nosnippet>180</a>        </span><span class="kw">let </span>response_json: PorkbunResponse = serde_json::from_str(<span class="kw-2">&amp;</span>response_text).context(
-<a href=#181 id=181 data-nosnippet>181</a>            <span class="macro">format!</span>(<span class="string">"Failed to parse Porkbun API response: {}"</span>, response_text),
+<a href=#181 id=181 data-nosnippet>181</a>            <span class="macro">format!</span>(<span class="string">"Failed to parse Porkbun API response: {response_text}"</span>),
 <a href=#182 id=182 data-nosnippet>182</a>        )<span class="question-mark">?</span>;
 <a href=#183 id=183 data-nosnippet>183</a>
 <a href=#184 id=184 data-nosnippet>184</a>        <span class="kw">if </span>response_json.status == <span class="string">"ERROR" </span>{

@@ -62,7 +62,7 @@
 <a href=#62 id=62 data-nosnippet>62</a>    <span class="kw">if </span>is_test_mode {
 <a href=#63 id=63 data-nosnippet>63</a>        <span class="kw">if let </span>(<span class="prelude-val">Some</span>(username), <span class="prelude-val">Some</span>(token)) = (test_username, test_token) {
 <a href=#64 id=64 data-nosnippet>64</a>            <span class="macro">println!</span>(<span class="string">"Using test credentials"</span>);
-<a href=#65 id=65 data-nosnippet>65</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>((username, <span class="macro">format!</span>(<span class="string">"Bearer {}"</span>, token)));
+<a href=#65 id=65 data-nosnippet>65</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>((username, <span class="macro">format!</span>(<span class="string">"Bearer {token}"</span>)));
 <a href=#66 id=66 data-nosnippet>66</a>        }
 <a href=#67 id=67 data-nosnippet>67</a>    }
 <a href=#68 id=68 data-nosnippet>68</a>
@@ -80,7 +80,7 @@
 <a href=#80 id=80 data-nosnippet>80</a>
 <a href=#81 id=81 data-nosnippet>81</a>    <span class="comment">// Open the browser to authenticate the user
 <a href=#82 id=82 data-nosnippet>82</a>    </span><span class="macro">println!</span>(<span class="string">"Opening browser for GitHub authentication..."</span>);
-<a href=#83 id=83 data-nosnippet>83</a>    <span class="macro">println!</span>(<span class="string">"Authorization URL: {}"</span>, authorize_url);
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="macro">println!</span>(<span class="string">"Authorization URL: {authorize_url}"</span>);
 <a href=#84 id=84 data-nosnippet>84</a>    <span class="kw">if let </span><span class="prelude-val">Err</span>(e) = open::that(authorize_url.to_string()) {
 <a href=#85 id=85 data-nosnippet>85</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">anyhow!</span>(<span class="string">"Failed to open browser: {}"</span>, e));
 <a href=#86 id=86 data-nosnippet>86</a>    }
@@ -98,7 +98,7 @@
 <a href=#98 id=98 data-nosnippet>98</a>    </span>{
 <a href=#99 id=99 data-nosnippet>99</a>        <span class="prelude-val">Ok</span>(token) =&gt; token,
 <a href=#100 id=100 data-nosnippet>100</a>        <span class="prelude-val">Err</span>(e) =&gt; {
-<a href=#101 id=101 data-nosnippet>101</a>            <span class="macro">println!</span>(<span class="string">"Error exchanging code for token: {:?}"</span>, e);
+<a href=#101 id=101 data-nosnippet>101</a>            <span class="macro">println!</span>(<span class="string">"Error exchanging code for token: {e:?}"</span>);
 <a href=#102 id=102 data-nosnippet>102</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">anyhow!</span>(
 <a href=#103 id=103 data-nosnippet>103</a>                <span class="string">"Failed to exchange authorization code for token: {}"</span>,
 <a href=#104 id=104 data-nosnippet>104</a>                e
@@ -113,13 +113,13 @@
 <a href=#113 id=113 data-nosnippet>113</a>    </span><span class="macro">println!</span>(<span class="string">"Getting GitHub user information..."</span>);
 <a href=#114 id=114 data-nosnippet>114</a>    <span class="kw">let </span>username = get_github_username(access_token).<span class="kw">await</span><span class="question-mark">?</span>;
 <a href=#115 id=115 data-nosnippet>115</a>
-<a href=#116 id=116 data-nosnippet>116</a>    <span class="prelude-val">Ok</span>((username, <span class="macro">format!</span>(<span class="string">"Bearer {}"</span>, access_token)))
+<a href=#116 id=116 data-nosnippet>116</a>    <span class="prelude-val">Ok</span>((username, <span class="macro">format!</span>(<span class="string">"Bearer {access_token}"</span>)))
 <a href=#117 id=117 data-nosnippet>117</a>}
 <a href=#118 id=118 data-nosnippet>118</a>
 <a href=#119 id=119 data-nosnippet>119</a><span class="doccomment">/// Create an OAuth client for GitHub
 <a href=#120 id=120 data-nosnippet>120</a></span><span class="kw">fn </span>get_oauth_client() -&gt; <span class="prelude-ty">Result</span>&lt;BasicClient&gt; {
-<a href=#121 id=121 data-nosnippet>121</a>    <span class="kw">let </span>redirect_url = <span class="macro">format!</span>(<span class="string">"http://localhost:{}/oauth/callback"</span>, REDIRECT_PORT);
-<a href=#122 id=122 data-nosnippet>122</a>    <span class="macro">println!</span>(<span class="string">"Redirect URL: {}"</span>, redirect_url);
+<a href=#121 id=121 data-nosnippet>121</a>    <span class="kw">let </span>redirect_url = <span class="macro">format!</span>(<span class="string">"http://localhost:{REDIRECT_PORT}/oauth/callback"</span>);
+<a href=#122 id=122 data-nosnippet>122</a>    <span class="macro">println!</span>(<span class="string">"Redirect URL: {redirect_url}"</span>);
 <a href=#123 id=123 data-nosnippet>123</a>
 <a href=#124 id=124 data-nosnippet>124</a>    <span class="prelude-val">Ok</span>(BasicClient::new(
 <a href=#125 id=125 data-nosnippet>125</a>        ClientId::new(get_client_id()),
@@ -134,7 +134,7 @@
 <a href=#134 id=134 data-nosnippet>134</a>
 <a href=#135 id=135 data-nosnippet>135</a><span class="doccomment">/// Starts a local HTTP server to receive the OAuth redirect
 <a href=#136 id=136 data-nosnippet>136</a></span><span class="kw">fn </span>start_redirect_server() -&gt; <span class="prelude-ty">Result</span>&lt;Server&gt; {
-<a href=#137 id=137 data-nosnippet>137</a>    <span class="kw">let </span>addr = SocketAddr::from_str(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"127.0.0.1:{}"</span>, REDIRECT_PORT))<span class="question-mark">?</span>;
+<a href=#137 id=137 data-nosnippet>137</a>    <span class="kw">let </span>addr = SocketAddr::from_str(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"127.0.0.1:{REDIRECT_PORT}"</span>))<span class="question-mark">?</span>;
 <a href=#138 id=138 data-nosnippet>138</a>    <span class="kw">let </span>server = Server::http(addr).map_err(|e| <span class="macro">anyhow!</span>(<span class="string">"Failed to start server: {}"</span>, e))<span class="question-mark">?</span>;
 <a href=#139 id=139 data-nosnippet>139</a>    <span class="prelude-val">Ok</span>(server)
 <a href=#140 id=140 data-nosnippet>140</a>}
@@ -195,7 +195,7 @@
 <a href=#195 id=195 data-nosnippet>195</a>    <span class="kw">let </span>user: GitHubUser = client
 <a href=#196 id=196 data-nosnippet>196</a>        .get(<span class="string">"https://api.github.com/user"</span>)
 <a href=#197 id=197 data-nosnippet>197</a>        .header(<span class="string">"User-Agent"</span>, <span class="string">"faasta-cli"</span>)
-<a href=#198 id=198 data-nosnippet>198</a>        .header(<span class="string">"Authorization"</span>, <span class="macro">format!</span>(<span class="string">"Bearer {}"</span>, token))
+<a href=#198 id=198 data-nosnippet>198</a>        .header(<span class="string">"Authorization"</span>, <span class="macro">format!</span>(<span class="string">"Bearer {token}"</span>))
 <a href=#199 id=199 data-nosnippet>199</a>        .send()
 <a href=#200 id=200 data-nosnippet>200</a>        .<span class="kw">await</span><span class="question-mark">?
 <a href=#201 id=201 data-nosnippet>201</a>        </span>.json()
