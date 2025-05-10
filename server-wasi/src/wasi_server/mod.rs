@@ -55,7 +55,7 @@ pub fn redirect_to_website() -> Result<Response<HyperOutgoingBody>> {
 
     Ok(Response::builder()
         .status(302)
-        .header("Location", "https://faasta.dev")
+        .header("Location", "https://website.faasta.xyz")
         .body(HyperOutgoingBody::new(body))?)
 }
 
