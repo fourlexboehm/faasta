@@ -81,7 +81,7 @@ fn rewrite_package_name(toml_input: &str, package_name: &str) -> String {
         }
 
         if in_package && trimmed.starts_with("name =") {
-            output.push_str(&format!("name = \"{}\"\n", package_name));
+            output.push_str(&format!("name = \"{package_name}\"\n"));
             in_package = false; // Only replace once
             continue;
         }

@@ -178,7 +178,7 @@ impl CertManager {
 
         // Parse the response
         let response_json: PorkbunResponse = serde_json::from_str(&response_text).context(
-            format!("Failed to parse Porkbun API response: {}", response_text),
+            format!("Failed to parse Porkbun API response: {response_text}"),
         )?;
 
         if response_json.status == "ERROR" {

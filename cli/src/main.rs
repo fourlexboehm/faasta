@@ -38,8 +38,8 @@ impl From<reqwest::Error> for CustomError {
 impl fmt::Display for CustomError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            CustomError::Io(err) => write!(f, "IO error: {}", err),
-            CustomError::Reqwest(err) => write!(f, "Reqwest error: {}", err),
+            CustomError::Io(err) => write!(f, "IO error: {err}"),
+            CustomError::Reqwest(err) => write!(f, "Reqwest error: {err}"),
         }
     }
 }
@@ -131,7 +131,7 @@ async fn main() {
                     }
                     Err(e) => {
                         spinner.finish_and_clear();
-                        eprintln!("Failed to load config: {}", e);
+                        eprintln!("Failed to load config: {e}");
                         exit(1);
                     }
                 }
@@ -142,7 +142,7 @@ async fn main() {
                 Ok(info) => info,
                 Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Failed to get project information: {}", e);
+                    eprintln!("Failed to get project information: {e}");
                     exit(1);
                 }
             };
@@ -157,7 +157,7 @@ async fn main() {
             } else {
                 // Auto-detect based on package name
                 let rust_compiled_name = package_name.replace('-', "_");
-                let wasm_filename = format!("{}.wasm", rust_compiled_name);
+                let wasm_filename = format!("{rust_compiled_name}.wasm");
 
                 // Path to the compiled WASM file (uses Rust's converted name)
                 target_directory
@@ -188,9 +188,8 @@ async fn main() {
             };
 
             spinner.set_message(format!(
-                "Uploading function '{}' to server...",
-                function_name
-            ));
+            "Uploading function '{function_name}' to server..."
+        ));
 
             if !wasm_path.exists() {
                 spinner.finish_and_clear();
@@ -230,7 +229,7 @@ async fn main() {
                 }
                 Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Failed to read WASM file: {}", e);
+                    eprintln!("Failed to read WASM file: {e}");
                     exit(1);
                 }
             };
@@ -252,13 +251,13 @@ async fn main() {
                 Ok(client) => client,
                 Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Failed to connect to server: {}", e);
+                    eprintln!("Failed to connect to server: {e}");
                     exit(1);
                 }
             };
 
             // Publish the function
-            let auth_token = format!("{}:{}", github_username, github_token);
+            let auth_token = format!("{github_username}:{github_token}");
             match client
                 .publish(
                     tarpc::context::current(),
@@ -270,7 +269,7 @@ async fn main() {
             {
                 Ok(Ok(message)) => {
                     spinner.finish_and_clear();
-                    println!("✅ {}", message);
+                    println!("✅ {message}");
 
                     // Extract server hostname from server address (remove port)
                     let server_host = extract_server_host(&args.server);
@@ -281,12 +280,12 @@ async fn main() {
                 }
                 Ok(Err(e)) => {
                     spinner.finish_and_clear();
-                    eprintln!("Server error: {:?}", e);
+                    eprintln!("Server error: {e:?}");
                     exit(1);
                 }
                 Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Communication error: {}", e);
+                    eprintln!("Communication error: {e}");
                     exit(1);
                 }
             };
@@ -296,7 +295,7 @@ async fn main() {
             invoke_function(&args.name, &args.arg)
                 .await
                 .unwrap_or_else(|e| {
-                    eprintln!("Failed to invoke function: {}", e);
+                    eprintln!("Failed to invoke function: {e}");
                     exit(1);
                 });
         }
@@ -333,7 +332,7 @@ async fn main() {
                 Ok(info) => info,
                 Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Failed to get project information: {}", e);
+                    eprintln!("Failed to get project information: {e}");
                     exit(1);
                 }
             };
@@ -341,7 +340,7 @@ async fn main() {
             // Build the project
             if let Err(e) = run::build_project(&package_root) {
                 spinner.finish_and_clear();
-                eprintln!("Failed to build project: {}", e);
+                eprintln!("Failed to build project: {e}");
                 exit(1);
             }
 
@@ -364,7 +363,7 @@ async fn main() {
                     }
                     Err(e) => {
                         spinner.finish_and_clear();
-                        eprintln!("Failed to load config: {}", e);
+                        eprintln!("Failed to load config: {e}");
                         None
                     }
                 };
@@ -378,7 +377,7 @@ async fn main() {
                 } else {
                     // Auto-detect based on package name
                     let rust_compiled_name = package_name.replace('-', "_");
-                    let wasm_filename = format!("{}.wasm", rust_compiled_name);
+                    let wasm_filename = format!("{rust_compiled_name}.wasm");
 
                     // Path to the compiled WASM file (uses Rust's converted name)
                     target_directory
@@ -451,7 +450,7 @@ async fn main() {
                     }
                     Err(e) => {
                         spinner.finish_and_clear();
-                        eprintln!("Failed to read WASM file: {}", e);
+                        eprintln!("Failed to read WASM file: {e}");
                         exit(1);
                     }
                 };
@@ -467,8 +466,7 @@ async fn main() {
                     };
 
                 spinner.set_message(format!(
-                    "Uploading function '{}' to server...",
-                    function_name
+                    "Uploading function '{function_name}' to server..."
                 ));
 
                 // Connect to the function service
@@ -479,13 +477,13 @@ async fn main() {
                     Ok(client) => client,
                     Err(e) => {
                         spinner.finish_and_clear();
-                        eprintln!("Failed to connect to server: {}", e);
+                        eprintln!("Failed to connect to server: {e}");
                         exit(1);
                     }
                 };
 
                 // Publish the function
-                let auth_token = format!("{}:{}", github_username, github_token);
+                let auth_token = format!("{github_username}:{github_token}");
                 match client
                     .publish(
                         tarpc::context::current(),
@@ -497,7 +495,7 @@ async fn main() {
                 {
                     Ok(Ok(message)) => {
                         spinner.finish_and_clear();
-                        println!("✅ {}", message);
+                        println!("✅ {message}");
 
                         // Extract server hostname from server address (remove port)
                         let server_host = extract_server_host(&build_args.server);
@@ -508,12 +506,12 @@ async fn main() {
                     }
                     Ok(Err(e)) => {
                         spinner.finish_and_clear();
-                        eprintln!("Server error: {:?}", e);
+                        eprintln!("Server error: {e:?}");
                         exit(1);
                     }
                     Err(e) => {
                         spinner.finish_and_clear();
-                        eprintln!("Communication error: {}", e);
+                        eprintln!("Communication error: {e}");
                         exit(1);
                     }
                 };
@@ -525,7 +523,7 @@ async fn main() {
             let mut config = match load_config() {
                 Ok(cfg) => cfg,
                 Err(e) => {
-                    eprintln!("Failed to load config: {}", e);
+                    eprintln!("Failed to load config: {e}");
                     exit(1);
                 }
             };
@@ -553,12 +551,11 @@ async fn main() {
                     Ok(_) => {
                         println!("GitHub credentials saved successfully.");
                         println!(
-                            "You can now deploy up to {} projects.",
-                            MAX_PROJECTS_PER_USER
+                            "You can now deploy up to {MAX_PROJECTS_PER_USER} projects."
                         );
                     }
                     Err(e) => {
-                        eprintln!("Failed to save config: {}", e);
+                        eprintln!("Failed to save config: {e}");
                         exit(1);
                     }
                 }
@@ -573,18 +570,17 @@ async fn main() {
                             Ok(_) => {
                                 println!("✅ GitHub authentication successful!");
                                 println!(
-                                    "You can now deploy up to {} projects.",
-                                    MAX_PROJECTS_PER_USER
+                                    "You can now deploy up to {MAX_PROJECTS_PER_USER} projects."
                                 );
                             }
                             Err(e) => {
-                                eprintln!("Failed to save config: {}", e);
+                                eprintln!("Failed to save config: {e}");
                                 exit(1);
                             }
                         }
                     }
                     Err(e) => {
-                        eprintln!("GitHub authentication failed: {}", e);
+                        eprintln!("GitHub authentication failed: {e}");
                         eprintln!("Try again or use manual login: cargo faasta login --manual --username <user> --token <token>");
                         exit(1);
                     }
@@ -609,7 +605,7 @@ async fn main() {
                 },
                 Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Failed to load config: {}", e);
+                    eprintln!("Failed to load config: {e}");
                     exit(1);
                 }
             };
@@ -622,7 +618,7 @@ async fn main() {
                 Ok(client) => client,
                 Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Failed to connect to server: {}", e);
+                    eprintln!("Failed to connect to server: {e}");
                     exit(1);
                 }
             };
@@ -630,7 +626,7 @@ async fn main() {
             // Call get_metrics
             spinner.finish_and_clear();
             if let Err(e) = get_metrics(&client, &github_username, &github_token).await {
-                eprintln!("Error fetching metrics: {}", e);
+                eprintln!("Error fetching metrics: {e}");
                 exit(1);
             }
         }
@@ -652,7 +648,7 @@ async fn main() {
                 },
                 Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Failed to load config: {}", e);
+                    eprintln!("Failed to load config: {e}");
                     exit(1);
                 }
             };
@@ -665,13 +661,13 @@ async fn main() {
                 Ok(client) => client,
                 Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Failed to connect to server: {}", e);
+                    eprintln!("Failed to connect to server: {e}");
                     exit(1);
                 }
             };
 
             // Create auth token (username:token format)
-            let auth_token = format!("{}:{}", github_username, github_token);
+            let auth_token = format!("{github_username}:{github_token}");
 
             // Call the unpublish RPC
             match client
@@ -691,13 +687,13 @@ async fn main() {
                         faasta_interface::FunctionError::PermissionDenied(_) => {
                             eprintln!("Error: You don't have permission to unpublish this function")
                         }
-                        _ => eprintln!("Server error: {:?}", e),
+                        _ => eprintln!("Server error: {e:?}"),
                     }
                     exit(1);
                 }
                 Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Communication error: {}", e);
+                    eprintln!("Communication error: {e}");
                     exit(1);
                 }
             }
@@ -720,7 +716,7 @@ async fn main() {
                 },
                 Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Failed to load config: {}", e);
+                    eprintln!("Failed to load config: {e}");
                     exit(1);
                 }
             };
@@ -733,7 +729,7 @@ async fn main() {
                 Ok(client) => client,
                 Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Failed to connect to server: {}", e);
+                    eprintln!("Failed to connect to server: {e}");
                     exit(1);
                 }
             };
@@ -741,7 +737,7 @@ async fn main() {
             // Call list_functions
             spinner.finish_and_clear();
             if let Err(e) = list_functions(&client, &github_username, &github_token).await {
-                eprintln!("Error listing functions: {}", e);
+                eprintln!("Error listing functions: {e}");
                 exit(1);
             }
         }
@@ -749,7 +745,7 @@ async fn main() {
         Commands::Run(run_args) => {
             // Call the run module handler
             run::handle_run(run_args.port).await.unwrap_or_else(|e| {
-                eprintln!("Failed to run function: {}", e);
+                eprintln!("Failed to run function: {e}");
                 exit(1);
             });
         }
@@ -899,7 +895,7 @@ pub const CLAP_STYLING: clap::builder::styling::Styles = clap::builder::styling:
 fn format_function_url(function_name: &str, server: &str) -> String {
     // Ensure server has a scheme
     let server_url = if !server.contains("://") {
-        format!("https://{}", server)
+        format!("https://{server}")
     } else {
         server.to_string()
     };
@@ -909,7 +905,7 @@ fn format_function_url(function_name: &str, server: &str) -> String {
     let url_parts: Vec<&str> = server_url.split("://").collect();
     if url_parts.len() != 2 {
         // If URL doesn't follow the expected format, fall back to a simple approach
-        return format!("https://{}/{}", server, function_name);
+        return format!("https://{server}/{function_name}");
     }
 
     let scheme = url_parts[0];
@@ -925,12 +921,12 @@ fn format_function_url(function_name: &str, server: &str) -> String {
         let base = if server_url.ends_with('/') {
             server_url
         } else {
-            format!("{}/", server_url)
+            format!("{server_url}/")
         };
-        format!("{}{}", base, function_name)
+        format!("{base}{function_name}")
     } else {
         // For a domain name, use function_name as a subdomain
-        format!("{}://{}.{}/", scheme, function_name, host)
+        format!("{scheme}://{function_name}.{host}/")
     }
 }
 
@@ -943,9 +939,9 @@ fn extract_server_host(server_addr: &str) -> String {
 
     // Remove port if present
     if let Some(host) = server_addr.split(':').next() {
-        format!("https://{}", host)
+        format!("https://{host}")
     } else {
-        format!("https://{}", server_addr)
+        format!("https://{server_addr}")
     }
 }
 
@@ -957,12 +953,12 @@ fn is_ip_address(host: &str) -> bool {
 async fn invoke_function(name: &str, arg: &str) -> Result<(), reqwest::Error> {
     let function_url = format_function_url(name, DEFAULT_INVOKE_URL);
     let invoke_url = if function_url.ends_with('/') {
-        format!("{}{}", function_url, arg)
+        format!("{function_url}{arg}")
     } else {
-        format!("{}/{}", function_url, arg)
+        format!("{function_url}/{arg}")
     };
 
-    println!("Invoking function at: {}", invoke_url);
+    println!("Invoking function at: {invoke_url}");
 
     // Create a client that accepts invalid certificates (for testing)
     let client = reqwest::Client::builder()
@@ -971,7 +967,7 @@ async fn invoke_function(name: &str, arg: &str) -> Result<(), reqwest::Error> {
 
     // Make sure we're using HTTPS
     let https_url = if !invoke_url.starts_with("https://") && !invoke_url.starts_with("http://") {
-        format!("https://{}", invoke_url)
+        format!("https://{invoke_url}")
     } else if invoke_url.starts_with("http://") {
         invoke_url.replace("http://", "https://")
     } else {
@@ -991,7 +987,7 @@ async fn get_metrics(
     token: &str,
 ) -> anyhow::Result<()> {
     // Create auth token (username:token format)
-    let auth_token = format!("{}:{}", username, token);
+    let auth_token = format!("{username}:{token}");
 
     println!("Fetching metrics from server...");
 
@@ -1016,7 +1012,7 @@ async fn get_metrics(
                 format!("{} ms", metrics.total_time)
             };
 
-            println!("║ Total Execution Time: {}", total_time);
+            println!("║ Total Execution Time: {total_time}");
             println!("║ Functions Deployed: {}", metrics.function_metrics.len());
             println!("╠══════════════════════════════════════════════════════");
 
@@ -1044,7 +1040,7 @@ async fn get_metrics(
                     format!("{} ms", function.total_time_millis)
                 };
 
-                println!("║ ├─ Total Execution Time: {}", exec_time);
+                println!("║ ├─ Total Execution Time: {exec_time}");
 
                 // Format average time per call
                 let avg_time = if function.call_count > 0 {
@@ -1056,7 +1052,7 @@ async fn get_metrics(
                     "N/A".to_string()
                 };
 
-                println!("║ ├─ Average Time per Call: {}", avg_time);
+                println!("║ ├─ Average Time per Call: {avg_time}");
                 println!("║ └─ Last Called: {}", function.last_called);
                 println!("╟──────────────────────────────────────────────────────");
             }
@@ -1064,7 +1060,7 @@ async fn get_metrics(
             Ok(())
         }
         Ok(Err(e)) => {
-            eprintln!("Server error: {:?}", e);
+            eprintln!("Server error: {e:?}");
             Err(anyhow::anyhow!("Server error: {:?}", e))
         }
         Err(e) => Err(anyhow::anyhow!("Communication error: {}", e)),
@@ -1078,9 +1074,9 @@ async fn list_functions(
     token: &str,
 ) -> anyhow::Result<()> {
     // Create auth token (username:token format)
-    let auth_token = format!("{}:{}", username, token);
+    let auth_token = format!("{username}:{token}");
 
-    println!("Fetching functions for GitHub user: {}...", username);
+    println!("Fetching functions for GitHub user: {username}...");
 
     // Call the list_functions RPC
     match client

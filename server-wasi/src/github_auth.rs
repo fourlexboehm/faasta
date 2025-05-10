@@ -67,7 +67,7 @@ impl GitHubAuth {
         let response = match client
             .get("https://api.github.com/user")
             .header("User-Agent", "faasta-server")
-            .header("Authorization", format!("Bearer {}", token_value))
+            .header("Authorization", format!("Bearer {token_value}"))
             .send()
             .await
         {

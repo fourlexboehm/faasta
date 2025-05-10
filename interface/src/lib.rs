@@ -195,11 +195,11 @@ impl FunctionService for FunctionServiceImpl {
         }
 
         // Save the WASM file
-        let wasm_path = self.functions_dir.join(format!("{}.wasm", name));
+        let wasm_path = self.functions_dir.join(format!("{name}.wasm"));
         let mut file = fs::File::create(&wasm_path)
-            .map_err(|e| FunctionError::InternalError(format!("Failed to create file: {}", e)))?;
+            .map_err(|e| FunctionError::InternalError(format!("Failed to create file: {e}")))?;
         file.write_all(&wasm_file)
-            .map_err(|e| FunctionError::InternalError(format!("Failed to write file: {}", e)))?;
+            .map_err(|e| FunctionError::InternalError(format!("Failed to write file: {e}")))?;
 
         // Create function info
         let now = chrono::Utc::now().to_rfc3339();
@@ -207,7 +207,7 @@ impl FunctionService for FunctionServiceImpl {
             name: name.clone(),
             owner: username,
             published_at: now,
-            usage: format!("https://faasta.xyz/{}", name),
+            usage: format!("https://faasta.xyz/{name}"),
         };
 
         // Save function metadata
@@ -216,7 +216,7 @@ impl FunctionService for FunctionServiceImpl {
 
         // TODO: Save metadata to a file or database
 
-        Ok(format!("Function '{}' published successfully", name))
+        Ok(format!("Function '{name}' published successfully"))
     }
 
     async fn list_functions(
@@ -282,10 +282,10 @@ impl FunctionService for FunctionServiceImpl {
             self.functions_db.remove(&name);
 
             // Remove WASM file
-            let wasm_path = self.functions_dir.join(format!("{}.wasm", name));
+            let wasm_path = self.functions_dir.join(format!("{name}.wasm"));
             if wasm_path.exists() {
                 fs::remove_file(wasm_path).map_err(|e| {
-                    FunctionError::InternalError(format!("Failed to remove file: {}", e))
+                    FunctionError::InternalError(format!("Failed to remove file: {e}"))
                 })?;
             }
 
@@ -294,8 +294,7 @@ impl FunctionService for FunctionServiceImpl {
             Ok(())
         } else {
             Err(FunctionError::NotFound(format!(
-                "Function '{}' not found",
-                name
+                "Function '{name}' not found"
             )))
         }
     }

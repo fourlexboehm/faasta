@@ -90,12 +90,12 @@ pub async fn connect_to_function_service(server_addr: &str) -> Result<FunctionSe
 
             // For localhost, use 127.0.0.1
             if hostname == "localhost" || hostname == "localhost.localdomain" {
-                format!("127.0.0.1:{}", port)
+                format!("127.0.0.1:{port}")
                     .parse()
                     .context("Failed to parse localhost address")?
             } else {
                 // For other hostnames, try to resolve using DNS
-                match tokio::net::lookup_host(format!("{}:{}", hostname, port)).await {
+                match tokio::net::lookup_host(format!("{hostname}:{port}")).await {
                     Ok(mut addrs) => {
                         // Take the first resolved address
                         if let Some(addr) = addrs.next() {
@@ -175,7 +175,7 @@ pub fn get_project_info() -> Result<(PathBuf, String, PathBuf), io::Error> {
         .output()
         .unwrap_or_else(|e| {
             spinner.finish_and_clear();
-            eprintln!("Failed to run cargo metadata: {}", e);
+            eprintln!("Failed to run cargo metadata: {e}");
             exit(1);
         });
 
@@ -188,7 +188,7 @@ pub fn get_project_info() -> Result<(PathBuf, String, PathBuf), io::Error> {
     // Parse JSON
     let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|e| {
         spinner.finish_and_clear();
-        eprintln!("Failed to parse cargo metadata: {}", e);
+        eprintln!("Failed to parse cargo metadata: {e}");
         exit(1);
     });
 
@@ -216,7 +216,7 @@ pub fn get_project_info() -> Result<(PathBuf, String, PathBuf), io::Error> {
     // Find the package for the current directory
     let current_dir = std::env::current_dir().unwrap_or_else(|e| {
         spinner.finish_and_clear();
-        eprintln!("Failed to get current directory: {}", e);
+        eprintln!("Failed to get current directory: {e}");
         exit(1);
     });
 
@@ -263,7 +263,7 @@ pub fn build_project(package_root: &PathBuf) -> Result<(), io::Error> {
         .status()
         .unwrap_or_else(|e| {
             spinner.finish_and_clear();
-            eprintln!("Failed to run cargo build: {}", e);
+            eprintln!("Failed to run cargo build: {e}");
             exit(1);
         });
 
@@ -284,7 +284,7 @@ pub async fn handle_run(port: u16) -> io::Result<()> {
     let (target_directory, package_name, package_root) = get_project_info()?;
 
     // Display project info
-    println!("Building project: {}", package_name);
+    println!("Building project: {package_name}");
     println!("Project root: {}", package_root.display());
 
     // Build the project first
@@ -292,7 +292,7 @@ pub async fn handle_run(port: u16) -> io::Result<()> {
 
     // Get the full WASM file path - use same logic as in deploy
     let rust_compiled_name = package_name.replace('-', "_");
-    let wasm_filename = format!("{}.wasm", rust_compiled_name);
+    let wasm_filename = format!("{rust_compiled_name}.wasm");
     let wasm_path = target_directory
         .join("wasm32-wasip2")
         .join("release")
@@ -308,13 +308,13 @@ pub async fn handle_run(port: u16) -> io::Result<()> {
         exit(1);
     }
 
-    println!("Starting local server on port {}...", port);
+    println!("Starting local server on port {port}...");
     let status = std::process::Command::new("wasmtime")
         .args(["serve", &wasm_path.to_string_lossy()])
         .current_dir(&package_root)
         .status()
         .unwrap_or_else(|e| {
-            eprintln!("Failed to run wasmtime serve: {}", e);
+            eprintln!("Failed to run wasmtime serve: {e}");
             exit(1);
         });
 

@@ -62,7 +62,7 @@ pub async fn github_oauth_flow() -> Result<(String, String)> {
     if is_test_mode {
         if let (Some(username), Some(token)) = (test_username, test_token) {
             println!("Using test credentials");
-            return Ok((username, format!("Bearer {}", token)));
+            return Ok((username, format!("Bearer {token}")));
         }
     }
 
@@ -80,7 +80,7 @@ pub async fn github_oauth_flow() -> Result<(String, String)> {
 
     // Open the browser to authenticate the user
     println!("Opening browser for GitHub authentication...");
-    println!("Authorization URL: {}", authorize_url);
+    println!("Authorization URL: {authorize_url}");
     if let Err(e) = open::that(authorize_url.to_string()) {
         return Err(anyhow!("Failed to open browser: {}", e));
     }
@@ -98,7 +98,7 @@ pub async fn github_oauth_flow() -> Result<(String, String)> {
     {
         Ok(token) => token,
         Err(e) => {
-            println!("Error exchanging code for token: {:?}", e);
+            println!("Error exchanging code for token: {e:?}");
             return Err(anyhow!(
                 "Failed to exchange authorization code for token: {}",
                 e
@@ -113,13 +113,13 @@ pub async fn github_oauth_flow() -> Result<(String, String)> {
     println!("Getting GitHub user information...");
     let username = get_github_username(access_token).await?;
 
-    Ok((username, format!("Bearer {}", access_token)))
+    Ok((username, format!("Bearer {access_token}")))
 }
 
 /// Create an OAuth client for GitHub
 fn get_oauth_client() -> Result<BasicClient> {
-    let redirect_url = format!("http://localhost:{}/oauth/callback", REDIRECT_PORT);
-    println!("Redirect URL: {}", redirect_url);
+    let redirect_url = format!("http://localhost:{REDIRECT_PORT}/oauth/callback");
+    println!("Redirect URL: {redirect_url}");
 
     Ok(BasicClient::new(
         ClientId::new(get_client_id()),
@@ -134,7 +134,7 @@ fn get_oauth_client() -> Result<BasicClient> {
 
 /// Starts a local HTTP server to receive the OAuth redirect
 fn start_redirect_server() -> Result<Server> {
-    let addr = SocketAddr::from_str(&format!("127.0.0.1:{}", REDIRECT_PORT))?;
+    let addr = SocketAddr::from_str(&format!("127.0.0.1:{REDIRECT_PORT}"))?;
     let server = Server::http(addr).map_err(|e| anyhow!("Failed to start server: {}", e))?;
     Ok(server)
 }
@@ -195,7 +195,7 @@ async fn get_github_username(token: &str) -> Result<String> {
     let user: GitHubUser = client
         .get("https://api.github.com/user")
         .header("User-Agent", "faasta-cli")
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .send()
         .await?
         .json()

@@ -1,5 +1,5 @@
 use crate::metrics::get_metrics;
-use crate::SERVER;
+use crate::wasi_server::SERVER;
 use faasta_interface::{FunctionError, FunctionInfo, FunctionResult, FunctionService, Metrics};
 use std::fs;
 use std::io::Write;
@@ -48,7 +48,7 @@ impl FunctionServiceImpl {
             .github_auth
             .authenticate_github(&github_auth_token)
             .await
-            .map_err(|e| FunctionError::AuthError(format!("Authentication error: {}", e)))?;
+            .map_err(|e| FunctionError::AuthError(format!("Authentication error: {e}")))?;
 
         if !is_valid || username.is_empty() {
             return Err(FunctionError::AuthError(
@@ -76,13 +76,13 @@ impl FunctionServiceImpl {
         }
 
         // Simple direct approach: use the exact function name for the WASM file
-        let wasm_filename = format!("{}.wasm", name);
+        let wasm_filename = format!("{name}.wasm");
         let wasm_path = server.functions_dir.join(&wasm_filename);
 
         // Check if function already exists
         if wasm_path.exists() {
             let entry_result = self.functions_tree.get(name.as_bytes()).map_err(|e| {
-                FunctionError::InternalError(format!("Failed to get function metadata: {}", e))
+                FunctionError::InternalError(format!("Failed to get function metadata: {e}"))
             })?;
 
             if let Some(entry_bytes) = entry_result {
@@ -95,8 +95,7 @@ impl FunctionServiceImpl {
                     Err(e) => {
                         error!("Failed to deserialize function info: {}", e);
                         return Err(FunctionError::InternalError(format!(
-                            "Failed to deserialize function info: {}",
-                            e
+                            "Failed to deserialize function info: {e}"
                         )));
                     }
                 };
@@ -130,8 +129,7 @@ impl FunctionServiceImpl {
                 Err(e) => {
                     error!("Failed to add project: {}", e);
                     return Err(FunctionError::InternalError(format!(
-                        "Failed to add project: {}",
-                        e
+                        "Failed to add project: {e}"
                     )));
                 }
             }
@@ -144,17 +142,17 @@ impl FunctionServiceImpl {
 
         // Write the WASM file
         let mut file = fs::File::create(&wasm_path)
-            .map_err(|e| FunctionError::InternalError(format!("Failed to create file: {}", e)))?;
+            .map_err(|e| FunctionError::InternalError(format!("Failed to create file: {e}")))?;
         file.write_all(&wasm_file)
-            .map_err(|e| FunctionError::InternalError(format!("Failed to write file: {}", e)))?;
+            .map_err(|e| FunctionError::InternalError(format!("Failed to write file: {e}")))?;
         let wasm = fs::read(&wasm_path).unwrap();
-        
+
         // Fix: properly handle the Result to avoid passing it directly to fs::write
         let cwasm = server
             .engine
             .precompile_component(&wasm)
             .map_err(|_| FunctionError::InvalidInput("Invalid Wasm".to_string()))?;
-        
+
         fs::write(wasm_path.with_extension("cwasm"), cwasm).unwrap();
 
         // Create function info with both subdomain and path-based URLs
@@ -163,25 +161,24 @@ impl FunctionServiceImpl {
             name: name.clone(),
             owner: username,
             published_at: now,
-            usage: format!("https://{}.faasta.xyz or https://faasta.xyz/{}", name, name),
+            usage: format!("https://{name}.faasta.xyz or https://faasta.xyz/{name}"),
         };
 
         // Serialize metadata with bincode
         let meta =
             bincode::encode_to_vec(&function_info, bincode::config::standard()).map_err(|e| {
                 FunctionError::InternalError(format!(
-                    "Failed to serialize function metadata: {}",
-                    e
+                    "Failed to serialize function metadata: {e}"
                 ))
             })?;
         // Persist metadata to sled
         self.functions_tree
             .insert(name.as_bytes(), meta)
             .map_err(|e| {
-                FunctionError::InternalError(format!("Failed to persist function metadata: {}", e))
+                FunctionError::InternalError(format!("Failed to persist function metadata: {e}"))
             })?;
 
-        Ok(format!("Function '{}' published successfully", name))
+        Ok(format!("Function '{name}' published successfully"))
     }
 
     async fn list_functions_impl(
@@ -194,7 +191,7 @@ impl FunctionServiceImpl {
             .github_auth
             .authenticate_github(&github_auth_token)
             .await
-            .map_err(|e| FunctionError::AuthError(format!("Authentication error: {}", e)))?;
+            .map_err(|e| FunctionError::AuthError(format!("Authentication error: {e}")))?;
 
         if !is_valid || username.is_empty() {
             return Err(FunctionError::AuthError(
@@ -221,8 +218,7 @@ impl FunctionServiceImpl {
                         }
                         Err(e) => {
                             error!(
-                                "Failed to deserialize function info for '{}': {}",
-                                project_name, e
+                                "Failed to deserialize function info for '{project_name}': {e}"
                             );
                         }
                     }
@@ -234,7 +230,7 @@ impl FunctionServiceImpl {
     }
 
     async fn unpublish_impl(&self, name: String, github_auth_token: String) -> FunctionResult<()> {
-        info!("Processing unpublish request for function: {}", name);
+        info!("Processing unpublish request for function: {name}");
 
         let server = SERVER.get().unwrap();
         // Use the new combined authentication function
@@ -243,8 +239,8 @@ impl FunctionServiceImpl {
             .authenticate_github(&github_auth_token)
             .await
             .map_err(|e| {
-                error!("Authentication error during unpublish: {}", e);
-                FunctionError::AuthError(format!("Authentication error: {}", e))
+                error!("Authentication error during unpublish: {e}");
+                FunctionError::AuthError(format!("Authentication error: {e}"))
             })?;
 
         if !is_valid || username.is_empty() {
@@ -254,11 +250,11 @@ impl FunctionServiceImpl {
             ));
         }
 
-        info!("Authentication successful for user: {}", username);
+        info!("Authentication successful for user: {username}");
 
         // Check if function exists
         let entry_result = self.functions_tree.get(name.as_bytes()).map_err(|e| {
-            FunctionError::InternalError(format!("Failed to get function metadata: {}", e))
+            FunctionError::InternalError(format!("Failed to get function metadata: {e}"))
         })?;
 
         if let Some(entry_bytes) = entry_result {
@@ -271,8 +267,7 @@ impl FunctionServiceImpl {
                 Err(e) => {
                     error!("Failed to deserialize function info: {}", e);
                     return Err(FunctionError::InternalError(format!(
-                        "Failed to deserialize function info: {}",
-                        e
+                        "Failed to deserialize function info: {e}"
                     )));
                 }
             };
@@ -289,48 +284,47 @@ impl FunctionServiceImpl {
             }
 
             // Remove WASM file using direct name
-            let wasm_filename = format!("{}.wasm", name);
+            let wasm_filename = format!("{name}.wasm");
             let wasm_path = server.functions_dir.join(wasm_filename);
             if wasm_path.exists() {
                 if let Err(e) = fs::remove_file(&wasm_path) {
-                    error!("Failed to remove WASM file: {}", e);
+                    error!("Failed to remove WASM file: {e}");
                 } else {
-                    debug!("Successfully removed WASM file for function '{}'", name);
+                    debug!("Successfully removed WASM file for function '{name}'");
                 }
             }
             let cwasm_path = wasm_path.with_extension("cwasm");
             if cwasm_path.exists() {
                 if let Err(e) = fs::remove_file(&cwasm_path) {
-                    error!("Failed to remove CWASM file: {}", e);
+                    error!("Failed to remove CWASM file: {e}");
                 } else {
-                    debug!("Successfully removed CWASM file for function '{}'", name);
+                    debug!("Successfully removed CWASM file for function '{name}'");
                 }
             }
 
             // Remove metadata from sled
             match self.functions_tree.remove(name.as_bytes()) {
-                Ok(_) => debug!("Successfully removed metadata for function '{}'", name),
-                Err(e) => error!("Failed to remove function metadata for '{}': {}", name, e),
+                Ok(_) => debug!("Successfully removed metadata for function '{name}'"),
+                Err(e) => error!("Failed to remove function metadata for '{name}': {e}"),
                 // We don't return an error here because the function was already removed
             }
 
             // Remove the project from the user's list
             match server.github_auth.remove_project(&username, &name).await {
                 Ok(_) => {
-                    debug!("Removed project '{}' for user '{}'", name, username);
+                    debug!("Removed project '{name}' for user '{username}'");
                 }
                 Err(e) => {
-                    error!("Failed to remove project: {}", e);
+                    error!("Failed to remove project: {e}");
                 }
             }
 
-            info!("Function '{}' unpublished successfully", name);
+            info!("Function '{name}' unpublished successfully");
             Ok(())
         } else {
-            error!("Function '{}' not found for unpublish operation", name);
+            error!("Function '{name}' not found for unpublish operation");
             Err(FunctionError::NotFound(format!(
-                "Function '{}' not found",
-                name
+                "Function '{name}' not found"
             )))
         }
     }
@@ -342,7 +336,7 @@ impl FunctionServiceImpl {
             .github_auth
             .authenticate_github(&github_auth_token)
             .await
-            .map_err(|e| FunctionError::AuthError(format!("Authentication error: {}", e)))?;
+            .map_err(|e| FunctionError::AuthError(format!("Authentication error: {e}")))?;
 
         if !is_valid || username.is_empty() {
             return Err(FunctionError::AuthError(

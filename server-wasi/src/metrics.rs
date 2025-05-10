@@ -187,7 +187,7 @@ fn function_wasm_exists(function_name: &str) -> bool {
     let functions_dir =
         std::env::var("FUNCTIONS_PATH").unwrap_or_else(|_| "./functions".to_string());
 
-    let wasm_filename = format!("{}.wasm", function_name);
+    let wasm_filename = format!("{function_name}.wasm");
     let wasm_path = Path::new(&functions_dir).join(&wasm_filename);
 
     wasm_path.exists()
