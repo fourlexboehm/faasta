@@ -1,9 +1,10 @@
 use anyhow::{anyhow, bail, Result};
 use bytes::Bytes;
-use dashmap::DashMap;
 use http_body_util::{BodyExt, Full};
 use hyper::{header::HOST, Method, Request, Response};
+use moka::future::Cache;
 use once_cell::sync::OnceCell;
+use std::sync::Arc;
 use std::{path::PathBuf, time::Instant};
 use tracing::{debug, error, info};
 use wasmtime::{
@@ -81,7 +82,7 @@ impl WasiHttpView for FaastaClientState {
 pub struct FaastaServer {
     pub engine: Engine,
     pub metadata_db: sled::Db,
-    pre_cache: DashMap<String, ProxyPre<FaastaClientState>>,
+    pre_cache: Cache<String, Arc<ProxyPre<FaastaClientState>>>,
     pub base_domain: String,
     pub functions_dir: PathBuf,
     pub github_auth: GitHubAuth,
@@ -100,7 +101,7 @@ impl FaastaServer {
         Ok(Self {
             engine,
             metadata_db,
-            pre_cache: DashMap::new(),
+            pre_cache: Cache::new(1000), // Limit to 1000 entries
             base_domain,
             functions_dir,
             github_auth,
@@ -109,10 +110,9 @@ impl FaastaServer {
 
     /// Remove a function from the pre_cache
     pub fn remove_from_cache(&self, function_name: &str) {
-        if self.pre_cache.contains_key(function_name) {
-            self.pre_cache.remove(function_name);
-            debug!("Removed function '{}' from component cache", function_name);
-        }
+        // With async cache we can't directly await here, so we drop the future explicitly
+        std::mem::drop(self.pre_cache.invalidate(function_name));
+        debug!("Removed function '{}' from component cache", function_name);
     }
 
     pub async fn handle_request(
@@ -380,7 +380,7 @@ impl FaastaServer {
             // This template function will be used to create a similarly configured store each time
             Box::new(move || FaastaClientState {
                 table: ResourceTable::new(),
-                wasi: WasiCtxBuilder::new().inherit_stdio().build(),
+                wasi: WasiCtxBuilder::new().build(), // No stdio inheritance
                 http: WasiHttpCtx::new(),
             })
         });
@@ -390,7 +390,7 @@ impl FaastaServer {
 
         // Update environment for this specific function
         client_state.wasi = WasiCtxBuilder::new()
-            // .inherit_stdio()
+            // Explicitly don't inherit stdio for security
             .env("FUNCTION_NAME", function_name)
             .build();
 
@@ -452,14 +452,14 @@ impl FaastaServer {
             function_name
         );
 
-        // First check if we have this pre-cached without cloning the key
-        if let Some(cached) = self.pre_cache.get(function_name) {
+        // First check if we have this pre-cached
+        if let Some(cached) = self.pre_cache.get(function_name).await {
             let elapsed = start_time.elapsed();
             info!(
                 "Proxy pre-cache hit for '{}', retrieved in {:?}",
                 function_name, elapsed
             );
-            return Ok(cached.value().clone());
+            return Ok((*cached).clone());
         }
 
         info!(
@@ -499,9 +499,8 @@ impl FaastaServer {
         let pre_time = pre_start.elapsed();
         info!("ProxyPre created for '{}' in {:?}", function_name, pre_time);
 
-        // Cache it for future use - only clone the string once when inserting
-        self.pre_cache
-            .insert(function_name.to_string(), pre.clone());
+        // Cache it for future use
+        self.pre_cache.insert(function_name.to_owned(), Arc::new(pre.clone())).await;
 
         let total_elapsed = start_time.elapsed();
         info!(

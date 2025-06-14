@@ -4,9 +4,11 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
+use tokio::time::{interval, Duration as TokioDuration};
 use tracing::{info, warn};
 
 // Porkbun API response structure
@@ -250,5 +252,26 @@ impl CertManager {
             self.domain
         );
         Ok(())
+    }
+
+    /// Spawn a background task that downloads new certificates every 7 days
+    pub fn spawn_periodic_renewal(self: Arc<Self>) {
+        tokio::spawn(async move {
+            // Initial delay to avoid downloading immediately after startup
+            tokio::time::sleep(TokioDuration::from_secs(60)).await;
+            
+            // Run every 7 days
+            let mut ticker = interval(TokioDuration::from_secs(7 * 24 * 60 * 60));
+            
+            loop {
+                ticker.tick().await;
+                info!("Running 7-day certificate renewal");
+                
+                match self.obtain_or_renew_certificate().await {
+                    Ok(_) => info!("Certificate renewal completed"),
+                    Err(e) => warn!("Certificate renewal failed: {}", e),
+                }
+            }
+        });
     }
 }

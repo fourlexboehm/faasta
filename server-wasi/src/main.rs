@@ -132,17 +132,21 @@ async fn main() -> anyhow::Result<()> {
     // Setup certificate management
     if args.auto_cert {
         // Create CertManager instance for Porkbun
-        let cert_manager = CertManager::new(
+        let cert_manager = Arc::new(CertManager::new(
             args.base_domain.clone(),
             args.certs_dir.clone(),
             args.tls_cert_path.clone(),
             args.tls_key_path.clone(),
-        );
+        ));
 
         cert_manager
             .obtain_or_renew_certificate()
             .await
             .context("Failed to obtain/renew TLS certificate")?;
+        
+        // Spawn periodic certificate download (every 7 days)
+        info!("Starting periodic certificate downloads every 7 days");
+        cert_manager.spawn_periodic_renewal();
     }
 
     // Pre-compile available functions to improve startup time
@@ -202,7 +206,7 @@ async fn main() -> anyhow::Result<()> {
     config.memory_init_cow(true);
     let mut pool = PoolingAllocationConfig::new();
     pool.total_memories(100);
-    pool.max_memory_size(1 << 31); // 2 GiB
+    pool.max_memory_size(1 << 28); // 256 MiB
     pool.total_tables(100);
     pool.table_elements(5000);
     pool.total_core_instances(100);
