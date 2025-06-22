@@ -137,15 +137,37 @@ impl FunctionServiceImpl {
 
         // When publishing a new version, clear any existing cache entry
         if let Some(server) = SERVER.get() {
-            server.remove_from_cache(&name);
+            server.remove_from_cache(&name).await;
         }
 
-        // Write the WASM file
-        let mut file = fs::File::create(&wasm_path)
-            .map_err(|e| FunctionError::InternalError(format!("Failed to create file: {e}")))?;
+        // Create a temporary file path to avoid race conditions
+        let temp_path = wasm_path.with_extension("wasm.tmp");
+
+        // Write to temporary path first
+        let mut file = fs::File::create(&temp_path).map_err(|e| {
+            FunctionError::InternalError(format!("Failed to create temp file: {e}"))
+        })?;
         file.write_all(&wasm_file)
-            .map_err(|e| FunctionError::InternalError(format!("Failed to write file: {e}")))?;
-        let wasm = fs::read(&wasm_path).unwrap();
+            .map_err(|e| FunctionError::InternalError(format!("Failed to write temp file: {e}")))?;
+
+        // Ensure file is flushed to disk
+        file.sync_all()
+            .map_err(|e| FunctionError::InternalError(format!("Failed to sync temp file: {e}")))?;
+
+        // Try to validate WASM file by precompiling it
+        if let Err(e) = server.engine.precompile_component(&wasm_file) {
+            // Remove temp file if validation fails
+            let _ = fs::remove_file(&temp_path);
+            return Err(FunctionError::InvalidInput(format!(
+                "Invalid WebAssembly component: {e}"
+            )));
+        }
+
+        // Atomically rename to final path
+        fs::rename(&temp_path, &wasm_path)
+            .map_err(|e| FunctionError::InternalError(format!("Failed to commit file: {e}")))?;
+
+        let wasm = wasm_file.clone(); // Use the already validated in-memory copy
 
         // Fix: properly handle the Result to avoid passing it directly to fs::write
         let cwasm = server
@@ -167,9 +189,7 @@ impl FunctionServiceImpl {
         // Serialize metadata with bincode
         let meta =
             bincode::encode_to_vec(&function_info, bincode::config::standard()).map_err(|e| {
-                FunctionError::InternalError(format!(
-                    "Failed to serialize function metadata: {e}"
-                ))
+                FunctionError::InternalError(format!("Failed to serialize function metadata: {e}"))
             })?;
         // Persist metadata to sled
         self.functions_tree
@@ -217,9 +237,7 @@ impl FunctionServiceImpl {
                             user_functions.push(function_info);
                         }
                         Err(e) => {
-                            error!(
-                                "Failed to deserialize function info for '{project_name}': {e}"
-                            );
+                            error!("Failed to deserialize function info for '{project_name}': {e}");
                         }
                     }
                 }

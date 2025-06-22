@@ -109,9 +109,8 @@ impl FaastaServer {
     }
 
     /// Remove a function from the pre_cache
-    pub fn remove_from_cache(&self, function_name: &str) {
-        // With async cache we can't directly await here, so we drop the future explicitly
-        std::mem::drop(self.pre_cache.invalidate(function_name));
+    pub async fn remove_from_cache(&self, function_name: &str) {
+        self.pre_cache.invalidate(function_name).await;
         debug!("Removed function '{}' from component cache", function_name);
     }
 
