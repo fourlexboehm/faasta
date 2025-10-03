@@ -1,3 +1,5 @@
+use compio::runtime::spawn;
+use compio::time::interval;
 use dashmap::DashMap;
 use faasta_interface::{FunctionMetricsResponse, Metrics};
 use once_cell::sync::Lazy;
@@ -5,7 +7,6 @@ use std::path::Path;
 use std::str;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::time::{interval, Duration as TokioDuration};
 use tracing::{debug, error, info};
 
 // Global metrics storage using DashMap for lock-free concurrent access
@@ -438,13 +439,14 @@ pub fn flush_metrics_to_db() {
     }
 }
 
-/// Spawn a Tokio task to periodically flush metrics to DB every `interval_secs` seconds.
+/// Spawn a background task to periodically flush metrics to DB every `interval_secs` seconds.
 pub fn spawn_periodic_flush(interval_secs: u64) {
-    tokio::spawn(async move {
-        let mut ticker = interval(TokioDuration::from_secs(interval_secs));
+    spawn(async move {
+        let mut ticker = interval(Duration::from_secs(interval_secs));
         loop {
             ticker.tick().await;
             flush_metrics_to_db();
         }
-    });
+    })
+    .detach();
 }

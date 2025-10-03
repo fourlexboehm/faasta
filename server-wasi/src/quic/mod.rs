@@ -34,9 +34,7 @@ fn run_rpc_server(
     listen_addr: String,
 ) -> Result<()> {
     let runtime = Runtime::new().context("failed to create compio runtime")?;
-    runtime.block_on(async move {
-        serve_rpc(tls_cert_path, tls_key_path, listen_addr).await
-    })
+    runtime.block_on(async move { serve_rpc(tls_cert_path, tls_key_path, listen_addr).await })
 }
 
 async fn serve_rpc(

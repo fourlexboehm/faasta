@@ -398,18 +398,12 @@ impl FunctionService for FunctionServiceImpl {
         Ok(ListFunctionsResponse { result })
     }
 
-    async fn unpublish(
-        &self,
-        request: UnpublishRequest,
-    ) -> bitrpc::Result<UnpublishResponse> {
+    async fn unpublish(&self, request: UnpublishRequest) -> bitrpc::Result<UnpublishResponse> {
         let result = self.unpublish_impl(request).await;
         Ok(UnpublishResponse { result })
     }
 
-    async fn get_metrics(
-        &self,
-        request: GetMetricsRequest,
-    ) -> bitrpc::Result<GetMetricsResponse> {
+    async fn get_metrics(&self, request: GetMetricsRequest) -> bitrpc::Result<GetMetricsResponse> {
         let result = self.get_metrics_impl(request).await;
         Ok(GetMetricsResponse { result })
     }

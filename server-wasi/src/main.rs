@@ -16,14 +16,14 @@ use wasi_server::SERVER;
 
 // use once_cell::sync::OnceCell;
 
+use compio::net::TcpListener;
+use compio::tls::TlsAcceptor;
+use rustls::ServerConfig;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::net::TcpListener;
-use tokio_rustls::rustls::ServerConfig;
-use tokio_rustls::TlsAcceptor;
-use tracing::{error, info, Level};
+use tracing::{Level, error, info};
 use wasmtime::{Config, Engine, InstanceAllocationStrategy, OptLevel, PoolingAllocationConfig};
 
 #[derive(Parser, Debug, Clone)]
@@ -105,7 +105,7 @@ async fn load_tls_config(args: &Args) -> Result<Arc<ServerConfig>> {
 // HTTP to HTTPS redirection using Axum framework
 // Note: run_http_server function has been moved to the http module
 
-#[tokio::main]
+#[compio::main]
 async fn main() -> anyhow::Result<()> {
     // Install default crypto provider for rustls
     rustls::crypto::ring::default_provider()
@@ -140,7 +140,7 @@ async fn main() -> anyhow::Result<()> {
             .obtain_or_renew_certificate()
             .await
             .context("Failed to obtain/renew TLS certificate")?;
-        
+
         // Spawn periodic certificate download (every 7 days)
         info!("Starting periodic certificate downloads every 7 days");
         cert_manager.spawn_periodic_renewal();
@@ -177,7 +177,6 @@ async fn main() -> anyhow::Result<()> {
         info!("Precompilation complete");
         Ok(())
     }
-
 
     info!(
         "Starting server-wasi with base domain: {}",
@@ -251,17 +250,16 @@ async fn main() -> anyhow::Result<()> {
 
     let tls_acceptor = TlsAcceptor::from(tls_config.clone());
 
-    // Start listening for HTTP connections (for redirects)
-    let http_listener = TcpListener::bind(&args.http_listen_addr)
-        .await
-        .with_context(|| format!("Failed to bind to {}", args.http_listen_addr))?;
-    info!(
-        "HTTP redirect service listening on http://{}",
-        args.http_listen_addr
-    );
-
-    // Start HTTP server as a separate tokio task
-    tokio::spawn(http::run_http_server(http_listener));
+    // NOTE: the HTTP redirect server still targets tokio today; disable it while
+    // migrating the main runtime to compio.
+    // let http_listener = TcpListener::bind(&args.http_listen_addr)
+    //     .await
+    //     .with_context(|| format!("Failed to bind to {}", args.http_listen_addr))?;
+    // info!(
+    //     "HTTP redirect service listening on http://{}",
+    //     args.http_listen_addr
+    // );
+    // compio::runtime::spawn(http::run_http_server(http_listener));
 
     // Start listening for HTTPS connections
     let listener = TcpListener::bind(&args.listen_addr)

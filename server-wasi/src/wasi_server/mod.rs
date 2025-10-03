@@ -1,19 +1,21 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use bytes::Bytes;
+use compio::runtime::spawn;
 use http_body_util::{BodyExt, Full};
-use hyper::{header::HOST, Method, Request, Response};
+use hyper::{Method, Request, Response, header::HOST};
 use moka::future::Cache;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
 use std::{path::PathBuf, time::Instant};
+use tokio::sync::oneshot;
 use tracing::{debug, error, info};
 use wasmtime::{
-    component::{Component, Linker, ResourceTable},
     Engine, Store,
+    component::{Component, Linker, ResourceTable},
 };
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView};
-use wasmtime_wasi_http::bindings::http::types::{ErrorCode, Scheme};
 use wasmtime_wasi_http::bindings::ProxyPre;
+use wasmtime_wasi_http::bindings::http::types::{ErrorCode, Scheme};
 use wasmtime_wasi_http::body::HyperOutgoingBody;
 use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 
@@ -171,7 +173,7 @@ impl FaastaServer {
                                     return text_response(
                                         401,
                                         "Invalid Authorization header format",
-                                    )
+                                    );
                                 }
                             }
                         }
@@ -408,7 +410,7 @@ impl FaastaServer {
         let mut store = Store::new(pre.engine(), client_state);
 
         // Setup the response channel
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let (sender, receiver) = oneshot::channel();
 
         // Create the WASI HTTP request
         let wasi_req = store.data_mut().new_incoming_request(Scheme::Http, req)?;
@@ -417,7 +419,7 @@ impl FaastaServer {
         let proxy = pre.instantiate_async(&mut store).await?;
 
         // Spawn a task to handle the function execution
-        let task = tokio::task::spawn(async move {
+        let task = spawn(async move {
             proxy
                 .wasi_http_incoming_handler()
                 .call_handle(store, wasi_req, wasi_resp_out)
@@ -426,23 +428,27 @@ impl FaastaServer {
         });
 
         // Wait for response with a 10-minute timeout
-        match tokio::time::timeout(std::time::Duration::from_secs(600), receiver).await {
-            Ok(receiver_result) => match receiver_result {
-                Ok(Ok(resp)) => Ok(resp),
-                Ok(Err(err_code)) => {
-                    error!("Function returned error: {:?}", err_code);
-                    Err(anyhow!("Function error: {:?}", err_code))
-                }
-                Err(_) => match task.await {
-                    Ok(Ok(())) => bail!("Function did not set response"),
-                    Ok(Err(e)) => Err(e),
-                    Err(e) => Err(e.into()),
-                },
-            },
-            Err(_) => {
-                error!("Function execution timed out after 10 minutes");
-                Err(anyhow!("Function execution timed out after 10 minutes"))
+        match receiver.await {
+            Ok(Ok(resp)) => Ok(resp),
+            Ok(Err(err_code)) => {
+                error!("Function returned error: {:?}", err_code);
+                Err(anyhow!("Function error: {:?}", err_code))
             }
+            Err(_) => match task.await {
+                Ok(Ok(())) => bail!("Function did not set response"),
+                Ok(Err(e)) => Err(e),
+                Err(panic) => {
+                    let message =
+                        if let Some(msg) = panic.downcast_ref::<String>().map(|s| s.clone()) {
+                            msg
+                        } else if let Some(msg) = panic.downcast_ref::<&'static str>() {
+                            (*msg).to_string()
+                        } else {
+                            "function task panicked".to_string()
+                        };
+                    Err(anyhow!(message))
+                }
+            },
         }
     }
 
@@ -505,7 +511,9 @@ impl FaastaServer {
         info!("ProxyPre created for '{}' in {:?}", function_name, pre_time);
 
         // Cache it for future use
-        self.pre_cache.insert(function_name.to_owned(), Arc::new(pre.clone())).await;
+        self.pre_cache
+            .insert(function_name.to_owned(), Arc::new(pre.clone()))
+            .await;
 
         let total_elapsed = start_time.elapsed();
         info!(

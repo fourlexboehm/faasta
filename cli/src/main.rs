@@ -93,7 +93,9 @@ async fn main() {
                             (Some(username), Some(token)) => Some((username, token)),
                             _ => {
                                 spinner.finish_and_clear();
-                                println!("No GitHub credentials found. Run 'cargo faasta login' to set up authentication.");
+                                println!(
+                                    "No GitHub credentials found. Run 'cargo faasta login' to set up authentication."
+                                );
                                 // println!("Or use --skip-auth to deploy without authentication (limited to one function).");
                                 exit(1);
                             }
@@ -157,9 +159,7 @@ async fn main() {
                 package_name.clone()
             };
 
-            spinner.set_message(format!(
-            "Uploading function '{function_name}' to server..."
-        ));
+            spinner.set_message(format!("Uploading function '{function_name}' to server..."));
 
             if !wasm_path.exists() {
                 spinner.finish_and_clear();
@@ -177,7 +177,9 @@ async fn main() {
                     eprintln!("  1. Run 'cargo faasta build' first with wasm32-wasip2 target");
                     eprintln!("  2. Specify an explicit WASM file path with --wasm-path");
                     eprintln!();
-                    eprintln!("If your WASM file is in a non-standard location or has a different name, use:");
+                    eprintln!(
+                        "If your WASM file is in a non-standard location or has a different name, use:"
+                    );
                     eprintln!("  cargo faasta deploy --wasm-path PATH/TO/YOUR/FILE.wasm");
                 }
                 exit(1);
@@ -320,7 +322,9 @@ async fn main() {
                             (Some(username), Some(token)) => Some((username, token)),
                             _ => {
                                 spinner.finish_and_clear();
-                                println!("No GitHub credentials found. Run 'cargo faasta login' to set up authentication.");
+                                println!(
+                                    "No GitHub credentials found. Run 'cargo faasta login' to set up authentication."
+                                );
                                 // println!("Or use 'cargo faasta deploy --skip-auth' to deploy without authentication (limited to one function).");
                                 None
                             }
@@ -391,7 +395,9 @@ async fn main() {
                         eprintln!("  1. Run 'cargo faasta build' first with wasm32-wasip2 target");
                         eprintln!("  2. Specify an explicit WASM file path with --wasm-path");
                         eprintln!();
-                        eprintln!("If your WASM file is in a non-standard location or has a different name, use:");
+                        eprintln!(
+                            "If your WASM file is in a non-standard location or has a different name, use:"
+                        );
                         eprintln!(
                             "  cargo faasta build --deploy --wasm-path PATH/TO/YOUR/FILE.wasm"
                         );
@@ -430,9 +436,7 @@ async fn main() {
                         exit(1);
                     };
 
-                spinner.set_message(format!(
-                    "Uploading function '{function_name}' to server..."
-                ));
+                spinner.set_message(format!("Uploading function '{function_name}' to server..."));
 
                 // Connect to the function service
                 let server_addr = &build_args.server;
@@ -510,9 +514,7 @@ async fn main() {
                 match save_config(&config) {
                     Ok(_) => {
                         println!("GitHub credentials saved successfully.");
-                        println!(
-                            "You can now deploy up to {MAX_PROJECTS_PER_USER} projects."
-                        );
+                        println!("You can now deploy up to {MAX_PROJECTS_PER_USER} projects.");
                     }
                     Err(e) => {
                         eprintln!("Failed to save config: {e}");
@@ -541,7 +543,9 @@ async fn main() {
                     }
                     Err(e) => {
                         eprintln!("GitHub authentication failed: {e}");
-                        eprintln!("Try again or use manual login: cargo faasta login --manual --username <user> --token <token>");
+                        eprintln!(
+                            "Try again or use manual login: cargo faasta login --manual --username <user> --token <token>"
+                        );
                         exit(1);
                     }
                 }
@@ -559,7 +563,9 @@ async fn main() {
                     (Some(username), Some(token)) => Some((username, token)),
                     _ => {
                         spinner.finish_and_clear();
-                        println!("No GitHub credentials found. Run 'cargo faasta login' to set up authentication.");
+                        println!(
+                            "No GitHub credentials found. Run 'cargo faasta login' to set up authentication."
+                        );
                         exit(1);
                     }
                 },
@@ -602,7 +608,9 @@ async fn main() {
                     (Some(username), Some(token)) => Some((username, token)),
                     _ => {
                         spinner.finish_and_clear();
-                        println!("No GitHub credentials found. Run 'cargo faasta login' to set up authentication.");
+                        println!(
+                            "No GitHub credentials found. Run 'cargo faasta login' to set up authentication."
+                        );
                         exit(1);
                     }
                 },
@@ -630,10 +638,7 @@ async fn main() {
             let auth_token = format!("{github_username}:{github_token}");
 
             // Call the unpublish RPC
-            match client
-                .unpublish(args.name.clone(), auth_token)
-                .await
-            {
+            match client.unpublish(args.name.clone(), auth_token).await {
                 Ok(Ok(_)) => {
                     spinner.finish_and_clear();
                     println!("✅ Function '{}' unpublished successfully", args.name);
@@ -670,7 +675,9 @@ async fn main() {
                     (Some(username), Some(token)) => Some((username, token)),
                     _ => {
                         spinner.finish_and_clear();
-                        println!("No GitHub credentials found. Run 'cargo faasta login' to set up authentication.");
+                        println!(
+                            "No GitHub credentials found. Run 'cargo faasta login' to set up authentication."
+                        );
                         exit(1);
                     }
                 },

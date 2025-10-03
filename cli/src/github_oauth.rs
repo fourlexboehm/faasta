@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use oauth2::{
-    basic::BasicClient, reqwest::async_http_client, AuthUrl, AuthorizationCode, ClientId,
-    ClientSecret, CsrfToken, RedirectUrl, Scope, TokenResponse, TokenUrl,
+    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope,
+    TokenResponse, TokenUrl, basic::BasicClient, reqwest::async_http_client,
 };
 use serde::Deserialize;
 use std::{net::SocketAddr, str::FromStr};
@@ -13,8 +13,8 @@ const DEFAULT_CLIENT_ID: &str = "Iv23lik79igmHPi63dO1";
 const DEFAULT_CLIENT_SECRET: &str = "2a10cd3c2465622a1649b766e574f15eb9211eb7";
 const REDIRECT_PORT: u16 = 9876;
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // Test mode flag
 static TEST_MODE: AtomicBool = AtomicBool::new(false);

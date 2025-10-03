@@ -1,88 +1,24 @@
-use anyhow::Result;
-use axum::{
-    extract::Host,
-    http::uri::{Authority, Uri},
-    response::Redirect,
-    Router,
-};
 use bytes::Bytes;
+use compio::net::TcpListener;
+use compio::runtime::spawn;
+use compio::tls::TlsAcceptor;
+use cyper_core::{CompioExecutor, HyperStream};
 use http::Response;
 use http_body_util::{BodyExt, Full};
-use hyper::body::Incoming;
-use hyper::server::conn::http1;
-use hyper::service::service_fn;
 use hyper::Request;
-use hyper_util::rt::TokioIo;
+use hyper::body::Incoming;
+use hyper::service::service_fn;
+use hyper_util::server::conn::auto::Builder;
 use std::convert::Infallible;
-use tokio::net::TcpListener;
-use tokio_rustls::TlsAcceptor;
 use tracing::{error, info};
 
-use crate::wasi_server::text_response;
 use crate::wasi_server::SERVER;
+use crate::wasi_server::text_response;
 
-type BoxError = Box<dyn std::error::Error + Send + Sync>;
-
-// Note: text_response and redirect_to_website functions have been moved to wasi_server module
-
-/// Runs the HTTP server that redirects HTTP requests to HTTPS
-pub async fn run_http_server(http_listener: TcpListener) {
-    info!("HTTP redirect server listening for connections");
-
-    // Create a function to convert HTTP URLs to HTTPS
-    let make_https = |host: &str, uri: Uri, https_port: u16| -> Result<Uri, BoxError> {
-        let mut parts = uri.into_parts();
-
-        parts.scheme = Some(axum::http::uri::Scheme::HTTPS);
-
-        if parts.path_and_query.is_none() {
-            parts.path_and_query = Some("/".parse().unwrap());
-        }
-
-        let authority: Authority = host.parse()?;
-        let bare_host = match authority.port() {
-            Some(port_struct) => authority
-                .as_str()
-                .strip_suffix(port_struct.as_str())
-                .unwrap()
-                .strip_suffix(':')
-                .unwrap(),
-            None => authority.as_str(),
-        };
-
-        parts.authority = Some(format!("{bare_host}:{https_port}").parse()?);
-
-        Ok(Uri::from_parts(parts)?)
-    };
-
-    // Get the local port this listener is bound to
-    let listener_addr = http_listener.local_addr().unwrap();
-
-    // Determine HTTPS port (default to 443)
-    let https_port = 443;
-
-    // Create the redirect handler
-    let redirect = move |Host(host): Host, uri: Uri| async move {
-        match make_https(&host, uri, https_port) {
-            Ok(uri) => Ok(Redirect::permanent(&uri.to_string())),
-            Err(error) => {
-                tracing::warn!(%error, "failed to convert URI to HTTPS");
-                Err(axum::http::StatusCode::BAD_REQUEST)
-            }
-        }
-    };
-
-    // Create Axum router with the redirect handler
-    let app = Router::new().fallback(redirect);
-
-    // Start the Axum HTTP server
-    info!(
-        "HTTP redirect service listening on http://{}",
-        listener_addr
-    );
-
-    // Serve with the existing TcpListener
-    axum::serve(http_listener, app).await.unwrap();
+/// Temporary stub while the redirect server is ported to compio.
+#[allow(dead_code)]
+pub async fn run_http_server(_http_listener: TcpListener) {
+    info!("HTTP redirect server disabled during compio migration");
 }
 
 /// Runs the HTTPS server
@@ -104,7 +40,7 @@ pub async fn run_https_server(listener: TcpListener, tls_acceptor: TlsAcceptor) 
         let tls_acceptor = tls_acceptor.clone();
 
         // Handle connection in a new task
-        tokio::spawn(async move {
+        spawn(async move {
             // Perform TLS handshake
             match tls_acceptor.accept(stream).await {
                 Ok(tls_stream) => {
@@ -144,21 +80,20 @@ pub async fn run_https_server(listener: TcpListener, tls_acceptor: TlsAcceptor) 
                         }
                     });
 
-                    // Serve the HTTP connection directly with hyper
-                    if let Err(err) = http1::Builder::new()
-                        .serve_connection(TokioIo::new(tls_stream), service)
+                    // Serve the HTTP connection directly with hyper using compio executor
+                    let hyper_stream = HyperStream::new(tls_stream);
+                    if let Err(err) = Builder::new(CompioExecutor)
+                        .serve_connection(hyper_stream, service)
                         .await
                     {
-                        // Only log errors that aren't from client disconnects
-                        if !err.is_closed() && !err.is_canceled() {
-                            error!("Error serving connection from {}: {}", peer_addr, err);
-                        }
+                        error!("Error serving connection from {}: {}", peer_addr, err);
                     }
                 }
                 Err(e) => {
                     error!("TLS handshake failed with {}: {}", peer_addr, e);
                 }
             }
-        });
+        })
+        .detach();
     }
 }

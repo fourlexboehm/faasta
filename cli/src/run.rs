@@ -1,5 +1,5 @@
-use anyhow::{anyhow, Result};
-use bitrpc::{cyper::CyperTransport, RpcError};
+use anyhow::{Result, anyhow};
+use bitrpc::{RpcError, cyper::CyperTransport};
 use faasta_interface::{
     FunctionResult, FunctionServiceRpc, GetMetricsRequest, ListFunctionsRequest, PublishRequest,
     UnpublishRequest,
@@ -7,8 +7,8 @@ use faasta_interface::{
 use std::io;
 use std::path::{Path as StdPath, PathBuf};
 use std::process::exit;
-use url::Url;
 use tracing::debug;
+use url::Url;
 
 /// Compare two file paths in a slightly more robust way.
 /// (On Windows, e.g., backslash vs forward slash).
@@ -65,7 +65,10 @@ impl FunctionServiceClient {
         github_auth_token: String,
     ) -> Result<FunctionResult<()>, RpcError> {
         let mut transport = self.new_transport();
-        let request = UnpublishRequest { name, github_auth_token };
+        let request = UnpublishRequest {
+            name,
+            github_auth_token,
+        };
         let response = FunctionServiceRpc::unpublish(&mut transport, request).await?;
         Ok(response.result)
     }
@@ -88,8 +91,7 @@ fn normalize_endpoint(server_addr: &str) -> Result<String> {
     }
 
     let mut url = if trimmed.contains("://") {
-        Url::parse(trimmed)
-            .map_err(|e| anyhow!("Invalid server address '{trimmed}': {e}"))?
+        Url::parse(trimmed).map_err(|e| anyhow!("Invalid server address '{trimmed}': {e}"))?
     } else {
         Url::parse(&format!("https://{trimmed}"))
             .or_else(|_| Url::parse(&format!("https://{trimmed}/")))

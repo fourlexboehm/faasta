@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.95"
-tokio = { version = "1.42", features = ["full", "net"] }
 hyper = { version = "1.1", features = ["full", "server"] }
 hyper-util = { version = "0.1", features = ["full"] }
 tracing = "0.1"
@@ -17,13 +16,14 @@ wasmtime = { version = "32.0" }
 wasmtime-wasi = "32.0"
 wasmtime-wasi-http = "32.0"
 rustls-pemfile = "2.2.0"
-tokio-rustls = "0.26.2"
 http-body-util = "0.1"
 bytes = "1.5"
 # Dependencies for network handling
 url = "2.5"
 http = "1.3.1"
 futures-util = "0.3" # Add futures-util
+futures = "0.3"
+tokio = { version = "1.42", features = ["sync"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 bincode = { version = "2", features = ["derive"] }
@@ -34,10 +34,14 @@ faasta-interface = { path = "../interface" }
 rustls = { version = "0.23.32", features = ["ring"] }
 dotenvy = "0.15"
 x509-parser = "0.17.0"
-# Add axum for HTTP redirection
-axum = "0.7.9"
 moka = { version = "0.12.10", features = ["future"] }
 bitrpc = {path = "../../bitrpc", features = ["compio-server"]}
-compio = { version = "0.16.0", features = ["rustls"] }
+compio = { version = "0.16.0", features = ["macros", "rustls", "time"] }
 compio-quic = { version = "0.5.0", features = ["h3"] }
 compio-runtime = "0.9.1"
+crossbeam = "0.8.4"
+cyper-axum = "0.5.0"
+compio-dispatcher = "0.8.0"
+num_cpus = "1.17.0"
+cyper-core = "0.5.0"
+async-oneshot-channel = "0.1.8"
