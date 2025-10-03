@@ -6,43 +6,13 @@ mod run;
 use anyhow::Error;
 use serde::{Deserialize, Serialize};
 use std::fs;
-// Removed unused imports
-use std::fmt;
 use std::path::PathBuf;
 use std::process::exit;
-// Removed unused imports
 
 const DEFAULT_INVOKE_URL: &str = "https://faasta.xyz/";
 const MAX_PROJECTS_PER_USER: usize = 10;
 const CONFIG_DIR: &str = ".faasta";
 const CONFIG_FILE: &str = "config.json";
-
-#[derive(Debug)]
-enum CustomError {
-    Io(std::io::Error),
-    Reqwest(reqwest::Error),
-}
-
-impl From<std::io::Error> for CustomError {
-    fn from(err: std::io::Error) -> CustomError {
-        CustomError::Io(err)
-    }
-}
-
-impl From<reqwest::Error> for CustomError {
-    fn from(err: reqwest::Error) -> CustomError {
-        CustomError::Reqwest(err)
-    }
-}
-
-impl fmt::Display for CustomError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            CustomError::Io(err) => write!(f, "IO error: {err}"),
-            CustomError::Reqwest(err) => write!(f, "Reqwest error: {err}"),
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 struct FaastaConfig {
@@ -259,12 +229,7 @@ async fn main() {
             // Publish the function
             let auth_token = format!("{github_username}:{github_token}");
             match client
-                .publish(
-                    tarpc::context::current(),
-                    wasm_data,
-                    function_name.clone(),
-                    auth_token,
-                )
+                .publish(wasm_data, function_name.clone(), auth_token)
                 .await
             {
                 Ok(Ok(message)) => {
@@ -485,12 +450,7 @@ async fn main() {
                 // Publish the function
                 let auth_token = format!("{github_username}:{github_token}");
                 match client
-                    .publish(
-                        tarpc::context::current(),
-                        wasm_data,
-                        function_name.clone(),
-                        auth_token,
-                    )
+                    .publish(wasm_data, function_name.clone(), auth_token)
                     .await
                 {
                     Ok(Ok(message)) => {
@@ -671,7 +631,7 @@ async fn main() {
 
             // Call the unpublish RPC
             match client
-                .unpublish(tarpc::context::current(), args.name.clone(), auth_token)
+                .unpublish(args.name.clone(), auth_token)
                 .await
             {
                 Ok(Ok(_)) => {
@@ -982,7 +942,7 @@ async fn invoke_function(name: &str, arg: &str) -> Result<(), reqwest::Error> {
 
 // Function to fetch and display metrics
 async fn get_metrics(
-    client: &faasta_interface::FunctionServiceClient,
+    client: &run::FunctionServiceClient,
     username: &str,
     token: &str,
 ) -> anyhow::Result<()> {
@@ -992,10 +952,7 @@ async fn get_metrics(
     println!("Fetching metrics from server...");
 
     // Call the get_metrics RPC
-    match client
-        .get_metrics(tarpc::context::current(), auth_token)
-        .await
-    {
+    match client.get_metrics(auth_token).await {
         Ok(Ok(metrics)) => {
             // Print summary
             println!("\n╔══════════════════════════════════════════════════════");
@@ -1069,7 +1026,7 @@ async fn get_metrics(
 
 // Function to fetch and display list of functions
 async fn list_functions(
-    client: &faasta_interface::FunctionServiceClient,
+    client: &run::FunctionServiceClient,
     username: &str,
     token: &str,
 ) -> anyhow::Result<()> {
@@ -1079,10 +1036,7 @@ async fn list_functions(
     println!("Fetching functions for GitHub user: {username}...");
 
     // Call the list_functions RPC
-    match client
-        .list_functions(tarpc::context::current(), auth_token)
-        .await
-    {
+    match client.list_functions(auth_token).await {
         Ok(Ok(functions)) => {
             if functions.is_empty() {
                 println!("\nNo functions deployed under this GitHub account.");

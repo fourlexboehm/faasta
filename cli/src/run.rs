@@ -1,17 +1,13 @@
-use anyhow::{anyhow, Context, Result};
-use faasta_interface::FunctionServiceClient;
+use anyhow::{anyhow, Result};
+use bitrpc::{cyper::CyperTransport, RpcError};
+use faasta_interface::{
+    FunctionResult, FunctionServiceRpc, GetMetricsRequest, ListFunctionsRequest, PublishRequest,
+    UnpublishRequest,
+};
 use std::io;
-// futures prelude removed
-use s2n_quic::client::Connect;
-use s2n_quic::provider::tls::default::callbacks::VerifyHostNameCallback;
-use s2n_quic::provider::tls::default::Client as TlsClient;
-use s2n_quic::Client;
-use std::net::SocketAddr;
 use std::path::{Path as StdPath, PathBuf};
 use std::process::exit;
-use tarpc::serde_transport as transport;
-use tarpc::tokio_serde::formats::Bincode;
-use tarpc::tokio_util::codec::LengthDelimitedCodec;
+use url::Url;
 use tracing::debug;
 
 /// Compare two file paths in a slightly more robust way.
@@ -23,144 +19,100 @@ fn same_file_path(a: &str, b: &str) -> bool {
     path_a == path_b
 }
 
+#[derive(Clone)]
+pub struct FunctionServiceClient {
+    endpoint: String,
+}
+
+impl FunctionServiceClient {
+    fn new(endpoint: String) -> Self {
+        Self { endpoint }
+    }
+
+    fn new_transport(&self) -> CyperTransport {
+        CyperTransport::new(self.endpoint.clone())
+    }
+
+    pub async fn publish(
+        &self,
+        wasm_file: Vec<u8>,
+        name: String,
+        github_auth_token: String,
+    ) -> Result<FunctionResult<String>, RpcError> {
+        let mut transport = self.new_transport();
+        let request = PublishRequest {
+            wasm_file,
+            name,
+            github_auth_token,
+        };
+        let response = FunctionServiceRpc::publish(&mut transport, request).await?;
+        Ok(response.result)
+    }
+
+    pub async fn list_functions(
+        &self,
+        github_auth_token: String,
+    ) -> Result<FunctionResult<Vec<faasta_interface::FunctionInfo>>, RpcError> {
+        let mut transport = self.new_transport();
+        let request = ListFunctionsRequest { github_auth_token };
+        let response = FunctionServiceRpc::list_functions(&mut transport, request).await?;
+        Ok(response.result)
+    }
+
+    pub async fn unpublish(
+        &self,
+        name: String,
+        github_auth_token: String,
+    ) -> Result<FunctionResult<()>, RpcError> {
+        let mut transport = self.new_transport();
+        let request = UnpublishRequest { name, github_auth_token };
+        let response = FunctionServiceRpc::unpublish(&mut transport, request).await?;
+        Ok(response.result)
+    }
+
+    pub async fn get_metrics(
+        &self,
+        github_auth_token: String,
+    ) -> Result<FunctionResult<faasta_interface::Metrics>, RpcError> {
+        let mut transport = self.new_transport();
+        let request = GetMetricsRequest { github_auth_token };
+        let response = FunctionServiceRpc::get_metrics(&mut transport, request).await?;
+        Ok(response.result)
+    }
+}
+
+fn normalize_endpoint(server_addr: &str) -> Result<String> {
+    let trimmed = server_addr.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow!("Server address cannot be empty"));
+    }
+
+    let mut url = if trimmed.contains("://") {
+        Url::parse(trimmed)
+            .map_err(|e| anyhow!("Invalid server address '{trimmed}': {e}"))?
+    } else {
+        Url::parse(&format!("https://{trimmed}"))
+            .or_else(|_| Url::parse(&format!("https://{trimmed}/")))
+            .map_err(|e| anyhow!("Invalid server address '{trimmed}': {e}"))?
+    };
+
+    if url.scheme() != "https" {
+        url.set_scheme("https")
+            .map_err(|_| anyhow!("Server address must use HTTPS"))?;
+    }
+
+    if url.path() == "/" {
+        url.set_path("/rpc");
+    }
+
+    Ok(url.to_string())
+}
+
 // Create a connection to the function service
 pub async fn connect_to_function_service(server_addr: &str) -> Result<FunctionServiceClient> {
-    // Check if we're connecting to localhost or 127.0.0.1
-    let skip_tls_validation =
-        server_addr.starts_with("localhost:") || server_addr.starts_with("127.0.0.1:");
-
-    // Set up the QUIC client with minimal logging
-    let client = if skip_tls_validation {
-        // Create a struct that implements VerifyHostNameCallback to accept any hostname
-        struct AcceptAnyHostname;
-        impl VerifyHostNameCallback for AcceptAnyHostname {
-            fn verify_host_name(&self, _server_name: &str) -> bool {
-                // Always return true to accept any hostname
-                true
-            }
-        }
-
-        // Use embedded certificate for localhost/127.0.0.1 connections
-        // This certificate is included at compile time
-        // It is self signed and matches the one in server-wasi, Not for Production use!
-        let cert_pem = include_str!("../certs/cert.pem");
-
-        // Build a TLS configuration using the embedded certificate
-        let tls_config = TlsClient::builder()
-            .with_certificate(cert_pem)
-            .context("Failed to add embedded certificate")?
-            // Skip hostname verification to allow self-signed certs on localhost
-            .with_verify_host_name_callback(AcceptAnyHostname)
-            .context("Failed to set hostname verification callback")?
-            .build()
-            .context("Failed to build TLS config")?;
-
-        // Use this config in the QUIC client
-        Client::builder()
-            .with_tls(tls_config)
-            .context("Failed to set TLS config")?
-            .with_io("0.0.0.0:0")
-            .context("Failed to set up client IO")?
-            .start()
-            .context("Failed to start client")?
-    } else {
-        // Standard client with default TLS settings
-        // For non-localhost connections, use the system's PKI
-        Client::builder()
-            .with_io("0.0.0.0:0")
-            .context("Failed to set up client IO")?
-            .start()
-            .context("Failed to start client")?
-    };
-
-    // Parse the server address, handling both IP:port and hostname:port formats
-    let addr: SocketAddr = match server_addr.parse() {
-        Ok(addr) => addr,
-        Err(_) => {
-            // Try to resolve the hostname
-            let parts: Vec<&str> = server_addr.split(':').collect();
-            if parts.len() != 2 {
-                return Err(anyhow!(
-                    "Invalid server address format. Expected hostname:port or IP:port"
-                ));
-            }
-
-            let hostname = parts[0];
-            let port = parts[1].parse::<u16>().context("Invalid port number")?;
-
-            // For localhost, use 127.0.0.1
-            if hostname == "localhost" || hostname == "localhost.localdomain" {
-                format!("127.0.0.1:{port}")
-                    .parse()
-                    .context("Failed to parse localhost address")?
-            } else {
-                // For other hostnames, try to resolve using DNS
-                match tokio::net::lookup_host(format!("{hostname}:{port}")).await {
-                    Ok(mut addrs) => {
-                        // Take the first resolved address
-                        if let Some(addr) = addrs.next() {
-                            addr
-                        } else {
-                            return Err(anyhow!(
-                                "Could not resolve hostname: {}. No addresses found.",
-                                hostname
-                            ));
-                        }
-                    }
-                    Err(e) => {
-                        return Err(anyhow!(
-                            "Could not resolve hostname: {}. Error: {}",
-                            hostname,
-                            e
-                        ));
-                    }
-                }
-            }
-        }
-    };
-
-    let server_name = if server_addr.starts_with("localhost:")
-        || server_addr.contains("localhost.localdomain:")
-    {
-        "localhost".to_string()
-    } else {
-        // Extract the hostname from the original server_addr string for SNI
-        let parts: Vec<&str> = server_addr.split(':').collect();
-        parts[0].to_string()
-    };
-
-    let connect = Connect::new(addr).with_server_name(server_name.as_str());
-
-    let mut connection = client
-        .connect(connect)
-        .await
-        .map_err(|e| {
-            // Provide minimal error info for handshake failures
-            if e.to_string().contains("handshake") {
-                if e.to_string().contains("timeout") {
-                    anyhow!("Failed to connect: Handshake timeout. Check your network connection or firewall settings.")
-                } else {
-                    anyhow!("Failed to connect: TLS handshake error. The server may be down or unreachable.")
-                }
-            } else {
-                anyhow!("Failed to connect: {}", e)
-            }
-        })?;
-
-    // Open bidirectional stream
-    let stream = connection
-        .open_bidirectional_stream()
-        .await
-        .map_err(|e| anyhow!("Failed to open stream: {}", e))?;
-    debug!("Opened bidirectional stream to function service");
-
-    let framed = LengthDelimitedCodec::builder().new_framed(stream);
-    let transport = transport::new(framed, Bincode::default());
-
-    // Use default client config
-    let client = FunctionServiceClient::new(Default::default(), transport).spawn();
-
-    Ok(client)
+    let endpoint = normalize_endpoint(server_addr)?;
+    debug!("Configured RPC endpoint: {}", endpoint);
+    Ok(FunctionServiceClient::new(endpoint))
 }
 
 /// Get the target directory and package name for the current project

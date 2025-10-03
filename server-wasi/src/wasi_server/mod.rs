@@ -20,7 +20,7 @@ use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 use crate::github_auth::GitHubAuth;
 use crate::metrics::Timer;
 use crate::rpc_service;
-use faasta_interface::FunctionService;
+use faasta_interface::{FunctionService, PublishRequest};
 
 // Global server reference for cache management
 pub static SERVER: OnceCell<FaastaServer> = OnceCell::new();
@@ -202,16 +202,22 @@ impl FaastaServer {
                     }
 
                     // Call the service to publish the function
-                    let result = service_impl
-                        .publish(
-                            tarpc::context::current(),
-                            wasm_bytes,
-                            function_name,
+                    let response = match service_impl
+                        .publish(PublishRequest {
+                            wasm_file: wasm_bytes,
+                            name: function_name,
                             github_auth_token,
-                        )
-                        .await;
+                        })
+                        .await
+                    {
+                        Ok(response) => response,
+                        Err(err) => {
+                            error!("RPC transport error during publish: {err}");
+                            return text_response(500, "Internal server error");
+                        }
+                    };
 
-                    match result {
+                    match response.result {
                         Ok(message) => {
                             let json = serde_json::json!({
                                 "success": true,

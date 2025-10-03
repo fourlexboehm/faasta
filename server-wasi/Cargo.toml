@@ -31,13 +31,13 @@ once_cell = "1.18"
 chrono = "0.4"
 reqwest = { version = "0.12", features = ["json"] }
 faasta-interface = { path = "../interface" }
-tarpc = { version = "0.36", features = ["full"] }
-futures = "0.3"
-s2n-quic = "1.32"
-rustls = { version = "0.23.25", features = ["ring"] }
-tokio-util = { version = "0.7", features = ["codec", "compat"] }
+rustls = { version = "0.23.32", features = ["ring"] }
 dotenvy = "0.15"
 x509-parser = "0.17.0"
 # Add axum for HTTP redirection
 axum = "0.7.9"
 moka = { version = "0.12.10", features = ["future"] }
+bitrpc = {path = "../../bitrpc", features = ["compio-server"]}
+compio = { version = "0.16.0", features = ["rustls"] }
+compio-quic = { version = "0.5.0", features = ["h3"] }
+compio-runtime = "0.9.1"

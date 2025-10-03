@@ -102,9 +102,6 @@ async fn load_tls_config(args: &Args) -> Result<Arc<ServerConfig>> {
     Ok(Arc::new(config))
 }
 
-// Function to handle connections for tarpc
-// Note: run_rpc_server function has been moved to the quic module
-
 // HTTP to HTTPS redirection using Axum framework
 // Note: run_http_server function has been moved to the http module
 
@@ -181,8 +178,6 @@ async fn main() -> anyhow::Result<()> {
         Ok(())
     }
 
-    // Create a clone for use in the QUIC server task
-    let args_clone = args.clone();
 
     info!(
         "Starting server-wasi with base domain: {}",
@@ -274,19 +269,15 @@ async fn main() -> anyhow::Result<()> {
         .with_context(|| format!("Failed to bind to {}", args.listen_addr))?;
     info!("Listening on https://{}", args.listen_addr);
 
-    // Start tarpc service for function management
-    let rpc_address = "0.0.0.0:4433";
-    tokio::spawn(async move {
-        if let Err(e) = quic::setup_quic_server(
-            args_clone.tls_cert_path,
-            args_clone.tls_key_path,
-            rpc_address,
-        )
-        .await
-        {
-            error!("Failed to start RPC server: {}", e);
-        }
-    });
+    // Start RPC service for function management on a dedicated compio runtime
+    let rpc_address = String::from("0.0.0.0:4433");
+    if let Err(e) = quic::spawn_rpc_server(
+        args.tls_cert_path.clone(),
+        args.tls_key_path.clone(),
+        rpc_address,
+    ) {
+        error!("Failed to spawn RPC server: {e}");
+    }
 
     // Run HTTPS server in the main thread
     http::run_https_server(listener, tls_acceptor).await;
