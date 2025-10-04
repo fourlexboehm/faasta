@@ -26,4 +26,4 @@ url = "2.5.0"
 faasta-interface = { path = "../interface", version = "0.1.0" }
 github-app-auth = "3.0.1"
 tracing = "0.1.40"
-bitrpc = { version = "0.2.0", path = "../../bitrpc", features = ["cyper"] }
+bitrpc = { version = "0.2.0", features = ["cyper"] }

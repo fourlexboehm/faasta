@@ -17,6 +17,6 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 bincode = { version = "2", features = ["derive"] }
 hyper = { version = "1.0", features = ["full"] }
-bitrpc = { version = "0.2.0", path = "../../bitrpc", features = ["compio-server"] }
+bitrpc = { version = "0.2.0", features = ["compio-server"] }
 http = "1.0"
 bitcode = { version = "0.6", features = ["derive"] }
