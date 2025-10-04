@@ -15,6 +15,14 @@ const DEFAULT_CLIENT_ID: &str = "Iv23lik79igmHPi63dO1";
 const DEFAULT_CLIENT_SECRET: &str = "2a10cd3c2465622a1649b766e574f15eb9211eb7";
 const REDIRECT_PORT: u16 = 9876;
 
+type GithubOAuthClient = BasicClient<
+    oauth2::EndpointSet,
+    oauth2::EndpointNotSet,
+    oauth2::EndpointNotSet,
+    oauth2::EndpointNotSet,
+    oauth2::EndpointSet,
+>;
+
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -95,7 +103,7 @@ pub async fn github_oauth_flow() -> Result<(String, String)> {
     println!("Exchanging authorization code for token...");
     let token = match github_client
         .exchange_code(AuthorizationCode::new(auth_code))
-        .request_async(cyper_async_http_client)
+        .request_async(&cyper_async_http_client)
         .await
     {
         Ok(token) => token,
@@ -119,19 +127,19 @@ pub async fn github_oauth_flow() -> Result<(String, String)> {
 }
 
 /// Create an OAuth client for GitHub
-fn get_oauth_client() -> Result<BasicClient> {
+fn get_oauth_client() -> Result<GithubOAuthClient> {
     let redirect_url = format!("http://localhost:{REDIRECT_PORT}/oauth/callback");
     println!("Redirect URL: {redirect_url}");
 
-    Ok(BasicClient::new(
-        ClientId::new(get_client_id()),
-        Some(ClientSecret::new(get_client_secret())),
-        AuthUrl::new("https://github.com/login/oauth/authorize".to_string())?,
-        Some(TokenUrl::new(
+    Ok(BasicClient::new(ClientId::new(get_client_id()))
+        .set_client_secret(ClientSecret::new(get_client_secret()))
+        .set_auth_uri(AuthUrl::new(
+            "https://github.com/login/oauth/authorize".to_string(),
+        )?)
+        .set_token_uri(TokenUrl::new(
             "https://github.com/login/oauth/access_token".to_string(),
-        )?),
-    )
-    .set_redirect_uri(RedirectUrl::new(redirect_url)?))
+        )?)
+        .set_redirect_uri(RedirectUrl::new(redirect_url)?))
 }
 
 /// Starts a local HTTP server to receive the OAuth redirect
@@ -208,48 +216,38 @@ async fn get_github_username(token: &str) -> Result<String> {
 async fn cyper_async_http_client(
     request: HttpRequest,
 ) -> std::result::Result<HttpResponse, cyper::Error> {
-    let method = request
-        .method
-        .as_str()
-        .parse::<http::Method>()
-        .map_err(|err| cyper::Error::Http(err.into()))?;
+    let method = request.method().clone();
 
     let mut outbound_headers = http::HeaderMap::new();
-    for (name, value) in request.headers.iter() {
-        let header_name = name
-            .as_str()
-            .parse::<http::header::HeaderName>()
-            .map_err(|err| cyper::Error::Http(err.into()))?;
-        let header_value = http::header::HeaderValue::from_bytes(value.as_bytes())
-            .map_err(|err| cyper::Error::Http(err.into()))?;
-        outbound_headers.append(header_name, header_value);
+    for (name, value) in request.headers().iter() {
+        outbound_headers.append(name.clone(), value.clone());
     }
 
     let response = HttpClient::new()
-        .request(method, request.url.clone())?
+        .request(method, request.uri().to_string())?
         .headers(outbound_headers)
-        .body(request.body.clone())
+        .body(request.body().clone())
         .send()
         .await?;
 
     let mut inbound_headers = oauth_http::HeaderMap::new();
     for (name, value) in response.headers().iter() {
-        let header_name = oauth_http::header::HeaderName::from_bytes(name.as_str().as_bytes())
-            .expect("response header name should be valid");
-        let header_value = oauth_http::header::HeaderValue::from_bytes(value.as_bytes())
-            .expect("response header value should be valid");
-        inbound_headers.append(header_name, header_value);
+        inbound_headers.append(name.clone(), value.clone());
     }
 
     let status_code = oauth_http::StatusCode::from_u16(response.status().as_u16())
         .expect("response status code should be valid");
     let body = response.bytes().await?.to_vec();
 
-    Ok(HttpResponse {
-        status_code,
-        headers: inbound_headers,
-        body,
-    })
+    let mut response_builder = oauth_http::Response::builder().status(status_code);
+    {
+        let headers = response_builder
+            .headers_mut()
+            .expect("builder should be valid");
+        *headers = inbound_headers;
+    }
+
+    Ok(response_builder.body(body)?)
 }
 
 #[cfg(test)]
