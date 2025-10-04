@@ -10,20 +10,20 @@ description = "Build and deploy wasi-http wasm to the faasta serverless platform
 
 [dependencies]
 anyhow.workspace = true
-serde_json.workspace = true
-compio = { version = "0.16.0", features = ["macros", "time"] }
-cyper = { version = "0.5.0", features = ["json", "rustls"] }
-http = "1"
+bitrpc = { version = "0.2.0", features = ["cyper"] }
 clap = { version = "4", features = ["derive"] }
 clap-cargo = "0.18"
-indicatif = "0.18"
+compio = { version = "0.16.0", features = ["macros", "time"] }
+cyper = { version = "0.5.0", features = ["json", "rustls"] }
 dirs = "6"
-serde = { version = "1.0", features = ["derive"] }
-oauth2 = { version = "5", default-features = false }
-open = "5"
-tiny_http = "0.12.0"
-url = "2.5.0"
 faasta-interface = { path = "../interface", version = "0.2.0" }
 github-app-auth = "3.0.1"
+http = "1"
+indicatif = "0.18"
+oauth2 = { version = "5", default-features = false }
+open = "5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json.workspace = true
+tiny_http = "0.12.0"
 tracing = "0.1.40"
-bitrpc = { version = "0.2.0", features = ["cyper"] }
+url = "2.5.0"

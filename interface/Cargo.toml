@@ -6,7 +6,7 @@ description = "bitrpc types for the faasta serverless platform"
 license = "MIT"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-thiserror = "1.0"
 bincode = "2"
 bitrpc = { version = "0.2.0", features = ["compio-server"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"

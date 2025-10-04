@@ -357,17 +357,15 @@ checksum = "2261d10cca569e4643e526d8dc2e62e433cc8aba21ab764233731f8d369bf394"
 
 [[package]]
 name = "bitrpc"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85867256883a59be0b9e28fdb0f75810eb914baf190803d27ec080ae30d54139"
+checksum = "e5ee575124b19dceb022a90b5e5a87e3894531a1e47a3008c07cae7872c654c8"
 dependencies = [
  "async-trait",
  "bitcode",
  "bitrpc-macros",
- "compio",
  "compio-buf",
  "compio-dispatcher",
- "compio-driver",
  "compio-net",
  "compio-quic",
  "compio-runtime",
