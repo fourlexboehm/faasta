@@ -172,7 +172,10 @@ impl CertManager {
 
         info!("Sending request to Porkbun API for domain: {}", self.domain);
 
-        let request = self.client.post(&url).context("Failed to create Porkbun request")?;
+        let request = self
+            .client
+            .post(&url)
+            .context("Failed to create Porkbun request")?;
         let request = request
             .json(&request_body)
             .context("Failed to serialize Porkbun request body")?;
