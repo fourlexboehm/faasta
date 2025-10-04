@@ -3,7 +3,8 @@ mod github_oauth;
 mod init;
 mod run;
 
-use anyhow::Error;
+use anyhow::{Context, Error};
+use cyper::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -69,7 +70,7 @@ use crate::init::NewArgs;
 use clap::{Args, Parser, Subcommand};
 
 /// Main entry point
-#[tokio::main]
+#[compio::main]
 async fn main() {
     let Faasta::Faasta(cli) = Faasta::parse();
 
@@ -917,7 +918,7 @@ fn is_ip_address(host: &str) -> bool {
     host.parse::<std::net::IpAddr>().is_ok()
 }
 
-async fn invoke_function(name: &str, arg: &str) -> Result<(), reqwest::Error> {
+async fn invoke_function(name: &str, arg: &str) -> anyhow::Result<()> {
     let function_url = format_function_url(name, DEFAULT_INVOKE_URL);
     let invoke_url = if function_url.ends_with('/') {
         format!("{function_url}{arg}")
@@ -927,10 +928,8 @@ async fn invoke_function(name: &str, arg: &str) -> Result<(), reqwest::Error> {
 
     println!("Invoking function at: {invoke_url}");
 
-    // Create a client that accepts invalid certificates (for testing)
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()?;
+    // Create a client using default TLS verification
+    let client = HttpClient::new();
 
     // Make sure we're using HTTPS
     let https_url = if !invoke_url.starts_with("https://") && !invoke_url.starts_with("http://") {
@@ -941,7 +940,11 @@ async fn invoke_function(name: &str, arg: &str) -> Result<(), reqwest::Error> {
         invoke_url
     };
 
-    let resp = client.get(https_url).send().await?;
+    let resp = client
+        .get(&https_url)?
+        .send()
+        .await
+        .with_context(|| format!("failed to invoke function at {https_url}"))?;
     println!("Response status: {}", resp.status());
     println!("{}", resp.text().await?);
     Ok(())

@@ -1,8 +1,10 @@
 use anyhow::Error;
+use compio::buf::BufResult;
+use cyper::Client as HttpClient;
 use dirs::config_dir;
 use github_app_auth::{GithubAuthParams, InstallationAccessToken};
-use reqwest::header::HeaderMap;
-use reqwest::header::{HeaderName, HeaderValue};
+use http::header::HeaderMap;
+use http::header::{HeaderName, HeaderValue};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -75,11 +77,11 @@ impl GitHubAuth {
             self.authenticate().await?;
         }
 
-        // Retrieve the OAuth2 header map and convert to reqwest::header::HeaderMap
+        // Retrieve the OAuth2 header map and convert to an HTTP header map
         let oauth_headers = self.token.as_mut().unwrap().header().await?;
         let mut headers = HeaderMap::new();
         for (name, value) in oauth_headers.iter() {
-            // Convert header name and value into reqwest types
+            // Convert header name and value into http types
             let hn = HeaderName::from_bytes(name.as_str().as_bytes())?;
             let hv = HeaderValue::from_bytes(value.as_bytes())?;
             headers.insert(hn, hv);
@@ -136,7 +138,7 @@ impl GitHubAuth {
 
     /// Get user ID from authenticated GitHub instance
     async fn fetch_and_store_user_id(&mut self) -> Result<(), Error> {
-        // Retrieve the underlying OAuth2 headers and convert to reqwest HeaderMap
+        // Retrieve the underlying OAuth2 headers and convert to http HeaderMap
         let oauth_headers = self.token.as_mut().unwrap().header().await?;
         let mut header = HeaderMap::new();
         for (name, value) in oauth_headers.iter() {
@@ -146,9 +148,8 @@ impl GitHubAuth {
         }
 
         // Create authenticated client
-        let client = reqwest::Client::new();
-        let response = client
-            .get("https://api.github.com/app")
+        let response = HttpClient::new()
+            .get("https://api.github.com/app")?
             .headers(header)
             .send()
             .await?;
@@ -184,13 +185,15 @@ impl GitHubAuth {
     /// Load config from disk
     async fn load_config(path: &Path) -> Result<AuthConfig, Error> {
         if path.exists() {
-            let content = tokio::fs::read_to_string(path).await?;
+            let data = compio::fs::read(path).await?;
+            let content = String::from_utf8(data)?;
             Ok(serde_json::from_str(&content)?)
         } else {
             // Create default config
             let default_config = AuthConfig::default();
             let content = serde_json::to_string_pretty(&default_config)?;
-            tokio::fs::write(path, content).await?;
+            let BufResult(result, _) = compio::fs::write(path, content.into_bytes()).await;
+            result?;
             Ok(default_config)
         }
     }
@@ -198,7 +201,8 @@ impl GitHubAuth {
     /// Save config to disk
     pub async fn save_config(&self) -> Result<(), Error> {
         let content = serde_json::to_string_pretty(&self.config)?;
-        tokio::fs::write(&self.config_path, content).await?;
+        let BufResult(result, _) = compio::fs::write(&self.config_path, content.into_bytes()).await;
+        result?;
         Ok(())
     }
 

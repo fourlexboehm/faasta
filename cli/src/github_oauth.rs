@@ -1,7 +1,9 @@
 use anyhow::{Result, anyhow};
+use cyper::Client as HttpClient;
+use oauth2::http as oauth_http;
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, RedirectUrl, Scope,
-    TokenResponse, TokenUrl, basic::BasicClient, reqwest::async_http_client,
+    AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, HttpRequest, HttpResponse,
+    RedirectUrl, Scope, TokenResponse, TokenUrl, basic::BasicClient,
 };
 use serde::Deserialize;
 use std::{net::SocketAddr, str::FromStr};
@@ -93,7 +95,7 @@ pub async fn github_oauth_flow() -> Result<(String, String)> {
     println!("Exchanging authorization code for token...");
     let token = match github_client
         .exchange_code(AuthorizationCode::new(auth_code))
-        .request_async(async_http_client)
+        .request_async(cyper_async_http_client)
         .await
     {
         Ok(token) => token,
@@ -191,11 +193,10 @@ fn wait_for_callback(server: Server, csrf_state: &CsrfToken) -> Result<String> {
 
 /// Gets the GitHub username from the user's profile
 async fn get_github_username(token: &str) -> Result<String> {
-    let client = reqwest::Client::new();
-    let user: GitHubUser = client
-        .get("https://api.github.com/user")
-        .header("User-Agent", "faasta-cli")
-        .header("Authorization", format!("Bearer {token}"))
+    let user: GitHubUser = HttpClient::new()
+        .get("https://api.github.com/user")?
+        .header("User-Agent", "faasta-cli")?
+        .header("Authorization", format!("Bearer {token}"))?
         .send()
         .await?
         .json()
@@ -204,11 +205,58 @@ async fn get_github_username(token: &str) -> Result<String> {
     Ok(user.login)
 }
 
+async fn cyper_async_http_client(
+    request: HttpRequest,
+) -> std::result::Result<HttpResponse, cyper::Error> {
+    let method = request
+        .method
+        .as_str()
+        .parse::<http::Method>()
+        .map_err(|err| cyper::Error::Http(err.into()))?;
+
+    let mut outbound_headers = http::HeaderMap::new();
+    for (name, value) in request.headers.iter() {
+        let header_name = name
+            .as_str()
+            .parse::<http::header::HeaderName>()
+            .map_err(|err| cyper::Error::Http(err.into()))?;
+        let header_value = http::header::HeaderValue::from_bytes(value.as_bytes())
+            .map_err(|err| cyper::Error::Http(err.into()))?;
+        outbound_headers.append(header_name, header_value);
+    }
+
+    let response = HttpClient::new()
+        .request(method, request.url.clone())?
+        .headers(outbound_headers)
+        .body(request.body.clone())
+        .send()
+        .await?;
+
+    let mut inbound_headers = oauth_http::HeaderMap::new();
+    for (name, value) in response.headers().iter() {
+        let header_name = oauth_http::header::HeaderName::from_bytes(name.as_str().as_bytes())
+            .expect("response header name should be valid");
+        let header_value = oauth_http::header::HeaderValue::from_bytes(value.as_bytes())
+            .expect("response header value should be valid");
+        inbound_headers.append(header_name, header_value);
+    }
+
+    let status_code = oauth_http::StatusCode::from_u16(response.status().as_u16())
+        .expect("response status code should be valid");
+    let body = response.bytes().await?.to_vec();
+
+    Ok(HttpResponse {
+        status_code,
+        headers: inbound_headers,
+        body,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[tokio::test]
+    #[compio::test]
     async fn test_oauth_flow_with_test_mode() {
         // Set up test mode
         enable_test_mode("test_user".to_string(), "test_token".to_string());

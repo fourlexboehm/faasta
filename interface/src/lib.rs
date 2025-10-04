@@ -67,62 +67,34 @@ pub struct Metrics {
     pub function_metrics: Vec<FunctionMetricsResponse>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Encode, Decode)]
-pub struct PublishRequest {
-    pub wasm_file: Vec<u8>,
-    pub name: String,
-    pub github_auth_token: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Encode, Decode)]
-pub struct PublishResponse {
-    pub result: FunctionResult<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Encode, Decode)]
-pub struct ListFunctionsRequest {
-    pub github_auth_token: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Encode, Decode)]
-pub struct ListFunctionsResponse {
-    pub result: FunctionResult<Vec<FunctionInfo>>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Encode, Decode)]
-pub struct UnpublishRequest {
-    pub name: String,
-    pub github_auth_token: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Encode, Decode)]
-pub struct UnpublishResponse {
-    pub result: FunctionResult<()>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Encode, Decode)]
-pub struct GetMetricsRequest {
-    pub github_auth_token: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Encode, Decode)]
-pub struct GetMetricsResponse {
-    pub result: FunctionResult<Metrics>,
-}
-
 /// Service interface for managing functions via bitrpc.
-#[bitrpc::service]
-#[derive(Clone, Debug, Encode, Decode)]
-pub enum FunctionServiceRpc {
+#[bitrpc::service(
+    request = FunctionServiceRequest,
+    response = FunctionServiceResponse,
+    client = FunctionServiceRpcClient
+)]
+pub trait FunctionService {
     /// Publish a new function
-    Publish(PublishRequest, PublishResponse),
+    async fn publish(
+        &self,
+        wasm_file: Vec<u8>,
+        name: String,
+        github_auth_token: String,
+    ) -> bitrpc::Result<FunctionResult<String>>;
     /// List all functions for the authenticated user
-    ListFunctions(ListFunctionsRequest, ListFunctionsResponse),
+    async fn list_functions(
+        &self,
+        github_auth_token: String,
+    ) -> bitrpc::Result<FunctionResult<Vec<FunctionInfo>>>;
     /// Unpublish a function
-    Unpublish(UnpublishRequest, UnpublishResponse),
+    async fn unpublish(
+        &self,
+        name: String,
+        github_auth_token: String,
+    ) -> bitrpc::Result<FunctionResult<()>>;
     /// Get metrics for all functions
-    GetMetrics(GetMetricsRequest, GetMetricsResponse),
+    async fn get_metrics(
+        &self,
+        github_auth_token: String,
+    ) -> bitrpc::Result<FunctionResult<Metrics>>;
 }
-
-pub use FunctionServiceRpcResponse as FunctionServiceResponse;
-pub use FunctionServiceRpcService as FunctionService;

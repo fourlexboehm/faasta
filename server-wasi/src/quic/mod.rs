@@ -2,42 +2,15 @@ use anyhow::{Context, Result};
 use bitrpc::ServerBuilder;
 use compio::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use compio_quic::ServerBuilder as QuicServerBuilder;
-use compio_runtime::Runtime;
 use faasta_interface::RpcRequestServiceWrapper;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
-use std::thread;
-use tracing::{error, info};
+use tracing::info;
 
 use crate::rpc_service;
 
-pub fn spawn_rpc_server(
-    tls_cert_path: PathBuf,
-    tls_key_path: PathBuf,
-    listen_addr: String,
-) -> Result<()> {
-    thread::Builder::new()
-        .name("faasta-rpc".into())
-        .spawn(move || {
-            if let Err(err) = run_rpc_server(tls_cert_path, tls_key_path, listen_addr) {
-                error!(?err, "RPC server terminated");
-            }
-        })
-        .context("failed to spawn RPC server thread")?;
-    Ok(())
-}
-
-fn run_rpc_server(
-    tls_cert_path: PathBuf,
-    tls_key_path: PathBuf,
-    listen_addr: String,
-) -> Result<()> {
-    let runtime = Runtime::new().context("failed to create compio runtime")?;
-    runtime.block_on(async move { serve_rpc(tls_cert_path, tls_key_path, listen_addr).await })
-}
-
-async fn serve_rpc(
+pub async fn run_rpc_server(
     tls_cert_path: PathBuf,
     tls_key_path: PathBuf,
     listen_addr: String,

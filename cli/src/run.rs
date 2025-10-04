@@ -1,9 +1,6 @@
 use anyhow::{Result, anyhow};
 use bitrpc::{RpcError, cyper::CyperTransport};
-use faasta_interface::{
-    FunctionResult, FunctionServiceRpc, GetMetricsRequest, ListFunctionsRequest, PublishRequest,
-    UnpublishRequest,
-};
+use faasta_interface::{FunctionResult, FunctionServiceRpcClient};
 use std::io;
 use std::path::{Path as StdPath, PathBuf};
 use std::process::exit;
@@ -39,24 +36,18 @@ impl FunctionServiceClient {
         name: String,
         github_auth_token: String,
     ) -> Result<FunctionResult<String>, RpcError> {
-        let mut transport = self.new_transport();
-        let request = PublishRequest {
-            wasm_file,
-            name,
-            github_auth_token,
-        };
-        let response = FunctionServiceRpc::publish(&mut transport, request).await?;
-        Ok(response.result)
+        let mut client = FunctionServiceRpcClient::new(self.new_transport());
+        let response = client.publish(wasm_file, name, github_auth_token).await?;
+        Ok(response)
     }
 
     pub async fn list_functions(
         &self,
         github_auth_token: String,
     ) -> Result<FunctionResult<Vec<faasta_interface::FunctionInfo>>, RpcError> {
-        let mut transport = self.new_transport();
-        let request = ListFunctionsRequest { github_auth_token };
-        let response = FunctionServiceRpc::list_functions(&mut transport, request).await?;
-        Ok(response.result)
+        let mut client = FunctionServiceRpcClient::new(self.new_transport());
+        let response = client.list_functions(github_auth_token).await?;
+        Ok(response)
     }
 
     pub async fn unpublish(
@@ -64,23 +55,18 @@ impl FunctionServiceClient {
         name: String,
         github_auth_token: String,
     ) -> Result<FunctionResult<()>, RpcError> {
-        let mut transport = self.new_transport();
-        let request = UnpublishRequest {
-            name,
-            github_auth_token,
-        };
-        let response = FunctionServiceRpc::unpublish(&mut transport, request).await?;
-        Ok(response.result)
+        let mut client = FunctionServiceRpcClient::new(self.new_transport());
+        let response = client.unpublish(name, github_auth_token).await?;
+        Ok(response)
     }
 
     pub async fn get_metrics(
         &self,
         github_auth_token: String,
     ) -> Result<FunctionResult<faasta_interface::Metrics>, RpcError> {
-        let mut transport = self.new_transport();
-        let request = GetMetricsRequest { github_auth_token };
-        let response = FunctionServiceRpc::get_metrics(&mut transport, request).await?;
-        Ok(response.result)
+        let mut client = FunctionServiceRpcClient::new(self.new_transport());
+        let response = client.get_metrics(github_auth_token).await?;
+        Ok(response)
     }
 }
 

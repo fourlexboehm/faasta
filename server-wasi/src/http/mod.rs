@@ -1,7 +1,10 @@
 use bytes::Bytes;
+use compio::BufResult;
+use compio::io::{AsyncWrite, AsyncWriteExt};
 use compio::net::TcpListener;
 use compio::runtime::spawn;
 use compio::tls::TlsAcceptor;
+use compio_dispatcher::Dispatcher;
 use cyper_core::{CompioExecutor, HyperStream};
 use http::Response;
 use http_body_util::{BodyExt, Full};
@@ -10,19 +13,77 @@ use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::server::conn::auto::Builder;
 use std::convert::Infallible;
+use std::sync::Arc;
 use tracing::{error, info};
 
 use crate::wasi_server::SERVER;
 use crate::wasi_server::text_response;
 
-/// Temporary stub while the redirect server is ported to compio.
-#[allow(dead_code)]
-pub async fn run_http_server(_http_listener: TcpListener) {
-    info!("HTTP redirect server disabled during compio migration");
+/// Minimal HTTP redirect server that upgrades all traffic to HTTPS.
+pub async fn run_http_server(http_listener: TcpListener, dispatcher: Arc<Dispatcher>) {
+    if let Ok(addr) = http_listener.local_addr() {
+        info!("HTTP redirect server listening on http://{}", addr);
+    } else {
+        info!("HTTP redirect server listening");
+    }
+
+    loop {
+        let (mut stream, peer_addr) = match http_listener.accept().await {
+            Ok(conn) => conn,
+            Err(err) => {
+                error!("Failed to accept redirect connection: {err}");
+                continue;
+            }
+        };
+
+        let dispatcher = dispatcher.clone();
+        match dispatcher.dispatch(move || async move {
+            let target = SERVER
+                .get()
+                .map(|server| format!("https://{}", server.base_domain))
+                .unwrap_or_else(|| "https://faasta.xyz".to_string());
+
+            let body = format!("Redirecting to {}\n", target);
+            let response = format!(
+                "HTTP/1.1 301 Moved Permanently\r\nLocation: {}\r\nContent-Length: {}\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n{}",
+                target,
+                body.len(),
+                body
+            );
+
+            let response_bytes = response.into_bytes();
+
+            let BufResult(write_res, _) = stream.write_all(response_bytes).await;
+            if let Err(err) = write_res {
+                error!("Failed to write redirect response to {}: {err}", peer_addr);
+                return;
+            }
+
+            if let Err(err) = stream.shutdown().await {
+                error!("Failed to shutdown redirect connection {}: {err}", peer_addr);
+            }
+        }) {
+            Ok(handle) => {
+                spawn(async move {
+                    if let Err(err) = handle.await {
+                        error!("Redirect task ended unexpectedly: {err}");
+                    }
+                })
+                .detach();
+            }
+            Err(err) => {
+                error!(?err, "Failed to dispatch redirect task");
+            }
+        }
+    }
 }
 
 /// Runs the HTTPS server
-pub async fn run_https_server(listener: TcpListener, tls_acceptor: TlsAcceptor) {
+pub async fn run_https_server(
+    listener: TcpListener,
+    tls_acceptor: TlsAcceptor,
+    dispatcher: Arc<Dispatcher>,
+) {
     info!("HTTPS server listening for connections");
 
     loop {
@@ -36,11 +97,9 @@ pub async fn run_https_server(listener: TcpListener, tls_acceptor: TlsAcceptor) 
         };
         info!("Accepted connection from {}", peer_addr);
 
-        // Clone acceptor for this connection
         let tls_acceptor = tls_acceptor.clone();
-
-        // Handle connection in a new task
-        spawn(async move {
+        let dispatcher = dispatcher.clone();
+        match dispatcher.dispatch(move || async move {
             // Perform TLS handshake
             match tls_acceptor.accept(stream).await {
                 Ok(tls_stream) => {
@@ -50,11 +109,7 @@ pub async fn run_https_server(listener: TcpListener, tls_acceptor: TlsAcceptor) 
                     let service = service_fn(move |req: Request<Incoming>| {
                         async move {
                             match SERVER.get().unwrap().handle_request(req).await {
-                                Ok(response) => {
-                                    // Just return the response directly - we'll handle any conversion issues
-                                    // at a different layer if needed
-                                    Ok::<_, anyhow::Error>(response)
-                                }
+                                Ok(response) => Ok::<_, anyhow::Error>(response),
                                 Err(e) => {
                                     error!("Error handling request: {}", e);
                                     // Return a generic 500 error response
@@ -93,7 +148,18 @@ pub async fn run_https_server(listener: TcpListener, tls_acceptor: TlsAcceptor) 
                     error!("TLS handshake failed with {}: {}", peer_addr, e);
                 }
             }
-        })
-        .detach();
+        }) {
+            Ok(handle) => {
+                spawn(async move {
+                    if let Err(err) = handle.await {
+                        error!("HTTPS task ended unexpectedly: {err}");
+                    }
+                })
+                .detach();
+            }
+            Err(err) => {
+                error!(?err, "Failed to dispatch HTTPS task");
+            }
+        }
     }
 }

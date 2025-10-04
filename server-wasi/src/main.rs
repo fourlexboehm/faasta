@@ -2,8 +2,11 @@
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use compio_dispatcher::Dispatcher;
 use std::fs;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
+use std::sync::Arc;
 mod cert_manager;
 mod github_auth;
 mod http;
@@ -17,14 +20,16 @@ use wasi_server::SERVER;
 // use once_cell::sync::OnceCell;
 
 use compio::net::TcpListener;
+use compio::runtime::spawn;
 use compio::tls::TlsAcceptor;
 use rustls::ServerConfig;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use tracing::{Level, error, info};
-use wasmtime::{Config, Engine, InstanceAllocationStrategy, OptLevel, PoolingAllocationConfig};
+use wasmtime::{
+    Cache, Config, Engine, InstanceAllocationStrategy, OptLevel, PoolingAllocationConfig,
+};
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "server-wasi")]
@@ -207,9 +212,8 @@ async fn main() -> anyhow::Result<()> {
     config.allocation_strategy(InstanceAllocationStrategy::Pooling(pool));
 
     // Enable module caching to speed up startup time
-    config.cache_config_load_default()?;
+    config.cache(Some(Cache::from_file(None)?));
 
-    // Set compilation settings
     config.cranelift_opt_level(OptLevel::Speed);
 
     // Enable parallel compilation if available
@@ -250,16 +254,25 @@ async fn main() -> anyhow::Result<()> {
 
     let tls_acceptor = TlsAcceptor::from(tls_config.clone());
 
-    // NOTE: the HTTP redirect server still targets tokio today; disable it while
-    // migrating the main runtime to compio.
-    // let http_listener = TcpListener::bind(&args.http_listen_addr)
-    //     .await
-    //     .with_context(|| format!("Failed to bind to {}", args.http_listen_addr))?;
-    // info!(
-    //     "HTTP redirect service listening on http://{}",
-    //     args.http_listen_addr
-    // );
-    // compio::runtime::spawn(http::run_http_server(http_listener));
+    let worker_threads = NonZeroUsize::new(num_cpus::get_physical())
+        .unwrap_or_else(|| NonZeroUsize::new(1).unwrap());
+    let dispatcher = Arc::new(
+        Dispatcher::builder()
+            .worker_threads(worker_threads)
+            .build()
+            .context("failed to build HTTP dispatcher")?,
+    );
+
+    let http_listener = TcpListener::bind(&args.http_listen_addr)
+        .await
+        .with_context(|| format!("Failed to bind to {}", args.http_listen_addr))?;
+    {
+        let dispatcher = dispatcher.clone();
+        spawn(async move {
+            http::run_http_server(http_listener, dispatcher).await;
+        })
+        .detach();
+    }
 
     // Start listening for HTTPS connections
     let listener = TcpListener::bind(&args.listen_addr)
@@ -269,15 +282,18 @@ async fn main() -> anyhow::Result<()> {
 
     // Start RPC service for function management on a dedicated compio runtime
     let rpc_address = String::from("0.0.0.0:4433");
-    if let Err(e) = quic::spawn_rpc_server(
-        args.tls_cert_path.clone(),
-        args.tls_key_path.clone(),
-        rpc_address,
-    ) {
-        error!("Failed to spawn RPC server: {e}");
+    {
+        let tls_cert_path = args.tls_cert_path.clone();
+        let tls_key_path = args.tls_key_path.clone();
+        spawn(async move {
+            if let Err(e) = quic::run_rpc_server(tls_cert_path, tls_key_path, rpc_address).await {
+                error!("RPC server terminated: {e}");
+            }
+        })
+        .detach();
     }
 
     // Run HTTPS server in the main thread
-    http::run_https_server(listener, tls_acceptor).await;
+    http::run_https_server(listener, tls_acceptor, dispatcher.clone()).await;
     Ok(())
 }

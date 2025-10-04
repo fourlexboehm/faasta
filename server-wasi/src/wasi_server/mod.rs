@@ -13,7 +13,7 @@ use wasmtime::{
     Engine, Store,
     component::{Component, Linker, ResourceTable},
 };
-use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::bindings::ProxyPre;
 use wasmtime_wasi_http::bindings::http::types::{ErrorCode, Scheme};
 use wasmtime_wasi_http::body::HyperOutgoingBody;
@@ -22,7 +22,6 @@ use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpView};
 use crate::github_auth::GitHubAuth;
 use crate::metrics::Timer;
 use crate::rpc_service;
-use faasta_interface::{FunctionService, PublishRequest};
 
 // Global server reference for cache management
 pub static SERVER: OnceCell<FaastaServer> = OnceCell::new();
@@ -62,21 +61,22 @@ pub fn redirect_to_website() -> Result<Response<HyperOutgoingBody>> {
         .body(HyperOutgoingBody::new(body))?)
 }
 
-impl wasmtime_wasi::IoView for FaastaClientState {
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.table
-    }
-}
-
 impl WasiView for FaastaClientState {
-    fn ctx(&mut self) -> &mut WasiCtx {
-        &mut self.wasi
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
     }
 }
 
 impl WasiHttpView for FaastaClientState {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
+    }
+
+    fn table(&mut self) -> &mut ResourceTable {
+        &mut self.table
     }
 }
 
@@ -204,22 +204,10 @@ impl FaastaServer {
                     }
 
                     // Call the service to publish the function
-                    let response = match service_impl
-                        .publish(PublishRequest {
-                            wasm_file: wasm_bytes,
-                            name: function_name,
-                            github_auth_token,
-                        })
+                    match service_impl
+                        .publish_impl(wasm_bytes, function_name, github_auth_token)
                         .await
                     {
-                        Ok(response) => response,
-                        Err(err) => {
-                            error!("RPC transport error during publish: {err}");
-                            return text_response(500, "Internal server error");
-                        }
-                    };
-
-                    match response.result {
                         Ok(message) => {
                             let json = serde_json::json!({
                                 "success": true,
@@ -244,6 +232,8 @@ impl FaastaServer {
                                 faasta_interface::FunctionError::InvalidInput(_) => 400,
                                 faasta_interface::FunctionError::InternalError(_) => 500,
                             };
+
+                            error!("Publish operation failed: {err}");
 
                             let json = serde_json::json!({
                                 "success": false,
@@ -493,7 +483,9 @@ impl FaastaServer {
             let mut linker = Linker::new(&self.engine);
 
             // Set up WASI and WASI-HTTP definitions - only needs to be done once
-            wasmtime_wasi::add_to_linker_async(&mut linker).expect("Failed to add WASI to linker");
+            // wasmtime_wasi::p3::add_to_linker_async(&mut linker).expect("Failed to add WASI to linker");
+            wasmtime_wasi::p2::add_to_linker_async(&mut linker)
+                .expect("Failed to add WASI to linker");
             wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)
                 .expect("Failed to add WASI-HTTP to linker");
 

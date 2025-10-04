@@ -1,10 +1,6 @@
 use crate::metrics::get_metrics;
 use crate::wasi_server::SERVER;
-use faasta_interface::{
-    FunctionError, FunctionInfo, FunctionResult, FunctionService, GetMetricsRequest,
-    GetMetricsResponse, ListFunctionsRequest, ListFunctionsResponse, Metrics, PublishRequest,
-    PublishResponse, UnpublishRequest, UnpublishResponse,
-};
+use faasta_interface::{FunctionError, FunctionInfo, FunctionResult, FunctionService, Metrics};
 use std::fs;
 use std::io::Write;
 use tracing::{debug, error, info};
@@ -40,12 +36,12 @@ impl FunctionServiceImpl {
 
 // Helper implementation that uses references to avoid cloning
 impl FunctionServiceImpl {
-    pub(crate) async fn publish_impl(&self, request: PublishRequest) -> FunctionResult<String> {
-        let PublishRequest {
-            wasm_file,
-            name,
-            github_auth_token,
-        } = request;
+    pub(crate) async fn publish_impl(
+        &self,
+        wasm_file: Vec<u8>,
+        name: String,
+        github_auth_token: String,
+    ) -> FunctionResult<String> {
         // Use the new combined authentication function
         let server = SERVER.get().unwrap();
         let (username, is_valid) = server
@@ -207,9 +203,8 @@ impl FunctionServiceImpl {
 
     pub(crate) async fn list_functions_impl(
         &self,
-        request: ListFunctionsRequest,
+        github_auth_token: String,
     ) -> FunctionResult<Vec<FunctionInfo>> {
-        let ListFunctionsRequest { github_auth_token } = request;
         // Use the new combined authentication function
         let server = SERVER.get().unwrap();
         let (username, is_valid) = server
@@ -252,11 +247,11 @@ impl FunctionServiceImpl {
         Ok(user_functions)
     }
 
-    pub(crate) async fn unpublish_impl(&self, request: UnpublishRequest) -> FunctionResult<()> {
-        let UnpublishRequest {
-            name,
-            github_auth_token,
-        } = request;
+    pub(crate) async fn unpublish_impl(
+        &self,
+        name: String,
+        github_auth_token: String,
+    ) -> FunctionResult<()> {
         info!("Processing unpublish request for function: {name}");
 
         let server = SERVER.get().unwrap();
@@ -358,9 +353,8 @@ impl FunctionServiceImpl {
 
     pub(crate) async fn get_metrics_impl(
         &self,
-        request: GetMetricsRequest,
+        github_auth_token: String,
     ) -> FunctionResult<Metrics> {
-        let GetMetricsRequest { github_auth_token } = request;
         // Use the new combined authentication function
         let server = SERVER.get().unwrap();
         let (username, is_valid) = server
@@ -385,27 +379,35 @@ impl FunctionServiceImpl {
 // Now implement the trait methods that use the reference-based implementations
 #[bitrpc::async_trait]
 impl FunctionService for FunctionServiceImpl {
-    async fn publish(&self, request: PublishRequest) -> bitrpc::Result<PublishResponse> {
-        let result = self.publish_impl(request).await;
-        Ok(PublishResponse { result })
+    async fn publish(
+        &self,
+        wasm_file: Vec<u8>,
+        name: String,
+        github_auth_token: String,
+    ) -> bitrpc::Result<FunctionResult<String>> {
+        Ok(self.publish_impl(wasm_file, name, github_auth_token).await)
     }
 
     async fn list_functions(
         &self,
-        request: ListFunctionsRequest,
-    ) -> bitrpc::Result<ListFunctionsResponse> {
-        let result = self.list_functions_impl(request).await;
-        Ok(ListFunctionsResponse { result })
+        github_auth_token: String,
+    ) -> bitrpc::Result<FunctionResult<Vec<FunctionInfo>>> {
+        Ok(self.list_functions_impl(github_auth_token).await)
     }
 
-    async fn unpublish(&self, request: UnpublishRequest) -> bitrpc::Result<UnpublishResponse> {
-        let result = self.unpublish_impl(request).await;
-        Ok(UnpublishResponse { result })
+    async fn unpublish(
+        &self,
+        name: String,
+        github_auth_token: String,
+    ) -> bitrpc::Result<FunctionResult<()>> {
+        Ok(self.unpublish_impl(name, github_auth_token).await)
     }
 
-    async fn get_metrics(&self, request: GetMetricsRequest) -> bitrpc::Result<GetMetricsResponse> {
-        let result = self.get_metrics_impl(request).await;
-        Ok(GetMetricsResponse { result })
+    async fn get_metrics(
+        &self,
+        github_auth_token: String,
+    ) -> bitrpc::Result<FunctionResult<Metrics>> {
+        Ok(self.get_metrics_impl(github_auth_token).await)
     }
 }
 
