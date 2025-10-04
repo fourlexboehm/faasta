@@ -1,5 +1,5 @@
 (function() {
-    var implementors = Object.fromEntries([["cargo_faasta",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.87.0/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"cargo_faasta/auth/struct.AuthConfig.html\" title=\"struct cargo_faasta::auth::AuthConfig\">AuthConfig</a>"]]]]);
+    var implementors = Object.fromEntries([["cargo_faasta",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.90.0/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"cargo_faasta/auth/struct.AuthConfig.html\" title=\"struct cargo_faasta::auth::AuthConfig\">AuthConfig</a>"]]]]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {

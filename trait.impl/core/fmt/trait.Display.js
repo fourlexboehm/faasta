@@ -1,5 +1,5 @@
 (function() {
-    var implementors = Object.fromEntries([["faasta_interface",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.87.0/core/fmt/trait.Display.html\" title=\"trait core::fmt::Display\">Display</a> for <a class=\"enum\" href=\"faasta_interface/enum.FunctionError.html\" title=\"enum faasta_interface::FunctionError\">FunctionError</a>"]]]]);
+    var implementors = Object.fromEntries([["faasta_interface",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.90.0/core/fmt/trait.Display.html\" title=\"trait core::fmt::Display\">Display</a> for <a class=\"enum\" href=\"faasta_interface/enum.FunctionError.html\" title=\"enum faasta_interface::FunctionError\">FunctionError</a>"]]]]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {

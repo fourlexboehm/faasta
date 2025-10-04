@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["build_project","connect_to_function_service","get_project_info","handle_run","same_file_path"]};
+window.SIDEBAR_ITEMS = {"fn":["build_project","connect_to_function_service","get_project_info","handle_run","normalize_endpoint","same_file_path"],"struct":["FunctionServiceClient"]};

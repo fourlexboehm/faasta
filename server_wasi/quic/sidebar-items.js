@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["run_rpc_server","setup_quic_server"]};
+window.SIDEBAR_ITEMS = {"fn":["load_certificates","load_private_key","run_rpc_server"]};

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["run_http_server","run_https_server"],"type":["BoxError"]};
+window.SIDEBAR_ITEMS = {"fn":["run_http_server","run_https_server"]};
