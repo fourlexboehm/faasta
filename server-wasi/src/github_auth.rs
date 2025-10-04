@@ -1,12 +1,13 @@
 use anyhow::Result;
 use bincode::{Decode, Encode};
+use cyper::Client as HttpClient;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::time::Duration;
 
 const USER_DB_TREE: &str = "user_data";
 const MAX_PROJECTS_PER_USER: usize = 10;
+const USER_AGENT: &str = "faasta-server";
 
 pub struct GitHubAuth {
     user_projects: DashMap<String, UserData>,
@@ -58,22 +59,35 @@ impl GitHubAuth {
                 (None, token.strip_prefix("Bearer ").unwrap_or(token).trim())
             };
 
-        // Create client with timeout to verify with GitHub API
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(3))
-            .build()?;
+        // Build request to GitHub API using compio-native HTTP client
+        let request = match HttpClient::new().get("https://api.github.com/user") {
+            Ok(builder) => builder,
+            Err(err) => {
+                tracing::error!("Failed to create GitHub request builder: {}", err);
+                return Ok(("".to_string(), false));
+            }
+        };
 
-        // Make a single API call to GitHub
-        let response = match client
-            .get("https://api.github.com/user")
-            .header("User-Agent", "faasta-server")
-            .header("Authorization", format!("Bearer {token_value}"))
-            .send()
-            .await
-        {
+        let request = match request.header("User-Agent", USER_AGENT) {
+            Ok(builder) => builder,
+            Err(err) => {
+                tracing::error!("Failed to set GitHub User-Agent header: {}", err);
+                return Ok(("".to_string(), false));
+            }
+        };
+
+        let request = match request.header("Authorization", format!("Bearer {token_value}")) {
+            Ok(builder) => builder,
+            Err(err) => {
+                tracing::error!("Failed to set GitHub Authorization header: {}", err);
+                return Ok(("".to_string(), false));
+            }
+        };
+
+        let response = match request.send().await {
             Ok(resp) => resp,
-            Err(e) => {
-                tracing::error!("GitHub API request failed: {}", e);
+            Err(err) => {
+                tracing::error!("GitHub API request failed: {}", err);
                 return Ok(("".to_string(), false));
             }
         };
