@@ -5,28 +5,24 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1"
-hyper = { version = "1", features = ["full", "server"] }
+hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive", "env"] }
 sled = "0.34"
 dashmap = "6"
-wasmtime = { version = "37.0" }
+wasmtime = "37.0"
 wasmtime-wasi = { version = "37.0", features = ["p3"] }
 wasmtime-wasi-http = "37.0"
 rustls-pemfile = "2"
 http-body-util = "0.1"
 bytes = "1"
-# Dependencies for network handling
-url = "2"
 http = "1"
-futures-util = "0.3" # Add futures-util
-futures = "0.3"
 tokio = { version = "1", features = ["sync"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-bincode = { version = "2", features = ["derive"] }
+bincode = "2"
 once_cell = "1"
 chrono = "0.4"
 cyper = { version = "0.5.0", features = ["json", "rustls"] }
@@ -38,8 +34,6 @@ moka = { version = "0.12.10", features = ["future"] }
 bitrpc = { version = "0.2.0", features = ["compio-server"] }
 compio = { version = "0.16.0", features = ["macros", "rustls", "time"] }
 compio-quic = { version = "0.5.0", features = ["h3"] }
-compio-runtime = "0.9.1"
-cyper-axum = "0.5.0"
 compio-dispatcher = "0.8.0"
 num_cpus = "1.17.0"
 cyper-core = "0.5.0"

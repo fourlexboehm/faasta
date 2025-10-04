@@ -6,6 +6,4 @@ exclude = ["function", "**/builds"]
 
 [workspace.dependencies]
 anyhow = "1.0.95"
-tokio = { version = "1.42", features = ["macros", "rt-multi-thread", "rt"] }
 serde_json = "1.0.134"
-bitcode = {path = "../bitrpc", version = "0.2"}
