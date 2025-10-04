@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["MAX_PROJECTS_PER_USER","USER_DB_TREE"],"struct":["GitHubAuth","UserData"]};
+window.SIDEBAR_ITEMS = {"constant":["MAX_PROJECTS_PER_USER","USER_AGENT","USER_DB_TREE"],"struct":["GitHubAuth","UserData"]};
