@@ -5,7 +5,7 @@
 <a href=#5 id=5 data-nosnippet>5</a><span class="kw">use </span>compio::runtime::spawn;
 <a href=#6 id=6 data-nosnippet>6</a><span class="kw">use </span>compio::tls::TlsAcceptor;
 <a href=#7 id=7 data-nosnippet>7</a><span class="kw">use </span>compio_dispatcher::Dispatcher;
-<a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span>cyper_core::{CompioExecutor, CompioTimer, HyperStream};
+<a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span>cyper_core::{CompioExecutor, HyperStream};
 <a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span>http::Response;
 <a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span>http_body_util::{BodyExt, Full};
 <a href=#11 id=11 data-nosnippet>11</a><span class="kw">use </span>hyper::Request;
@@ -137,10 +137,10 @@
 <a href=#137 id=137 data-nosnippet>137</a>
 <a href=#138 id=138 data-nosnippet>138</a>                    <span class="comment">// Serve the HTTP connection directly with hyper using compio executor
 <a href=#139 id=139 data-nosnippet>139</a>                    </span><span class="kw">let </span>hyper_stream = HyperStream::new(tls_stream);
-<a href=#140 id=140 data-nosnippet>140</a>                    <span class="kw">let </span><span class="kw-2">mut </span>builder = Builder::new(CompioExecutor);
-<a href=#141 id=141 data-nosnippet>141</a>                    builder.http1().timer(CompioTimer::default());
-<a href=#142 id=142 data-nosnippet>142</a>                    builder.http2().timer(CompioTimer::default());
-<a href=#143 id=143 data-nosnippet>143</a>                    <span class="kw">if let </span><span class="prelude-val">Err</span>(err) = builder.serve_connection(hyper_stream, service).<span class="kw">await </span>{
+<a href=#140 id=140 data-nosnippet>140</a>                    <span class="kw">if let </span><span class="prelude-val">Err</span>(err) = Builder::new(CompioExecutor)
+<a href=#141 id=141 data-nosnippet>141</a>                        .serve_connection(hyper_stream, service)
+<a href=#142 id=142 data-nosnippet>142</a>                        .<span class="kw">await
+<a href=#143 id=143 data-nosnippet>143</a>                    </span>{
 <a href=#144 id=144 data-nosnippet>144</a>                        <span class="macro">error!</span>(<span class="string">"Error serving connection from {}: {}"</span>, peer_addr, err);
 <a href=#145 id=145 data-nosnippet>145</a>                    }
 <a href=#146 id=146 data-nosnippet>146</a>                }
