@@ -29,7 +29,9 @@ pub type FunctionResult<T> = std::result::Result<T, FunctionError>;
 // Define the data structures for our service
 
 /// Represents a published function
-#[derive(Clone, Debug, Serialize, Deserialize, Encode, Decode)]
+#[derive(
+    Clone, Debug, Serialize, Deserialize, Encode, Decode, bincode::Encode, bincode::Decode,
+)]
 pub struct FunctionInfo {
     /// Name of the function
     pub name: String,

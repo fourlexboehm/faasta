@@ -5,7 +5,7 @@ use compio::net::TcpListener;
 use compio::runtime::spawn;
 use compio::tls::TlsAcceptor;
 use compio_dispatcher::Dispatcher;
-use cyper_core::{CompioExecutor, CompioTimer, HyperStream};
+use cyper_core::{CompioExecutor, HyperStream};
 use http::Response;
 use http_body_util::{BodyExt, Full};
 use hyper::Request;
@@ -137,10 +137,10 @@ pub async fn run_https_server(
 
                     // Serve the HTTP connection directly with hyper using compio executor
                     let hyper_stream = HyperStream::new(tls_stream);
-                    let mut builder = Builder::new(CompioExecutor);
-                    builder.http1().timer(CompioTimer::default());
-                    builder.http2().timer(CompioTimer::default());
-                    if let Err(err) = builder.serve_connection(hyper_stream, service).await {
+                    if let Err(err) = Builder::new(CompioExecutor)
+                        .serve_connection(hyper_stream, service)
+                        .await
+                    {
                         error!("Error serving connection from {}: {}", peer_addr, err);
                     }
                 }

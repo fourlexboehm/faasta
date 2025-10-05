@@ -2,13 +2,13 @@ use anyhow::{Context, Result};
 use compio::buf::BufResult;
 use compio::fs::OpenOptions;
 use compio::io::AsyncWriteAtExt;
-use compio::runtime::{spawn, spawn_blocking};
+use compio::runtime::spawn;
 use compio::time::{interval, sleep};
 use cyper::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tracing::{info, warn};
@@ -59,33 +59,33 @@ impl CertManager {
     }
 
     // Check if certificate needs renewal based on expiry date
-    fn needs_cert_renewal_internal(domain: &str, cert_path: &Path) -> Result<bool> {
+    fn needs_cert_renewal(&self) -> Result<bool> {
         // If cert doesn't exist, we need to renew
-        if !cert_path.exists() {
+        if !self.cert_path.exists() {
             info!("Certificate file doesn't exist, will download it");
             return Ok(true);
         }
 
         // Check certificate expiration date
-        match Self::get_expiry_time_internal(cert_path) {
+        match self.get_expiry_time() {
             Ok(expiry) => {
                 let now = SystemTime::now();
                 match expiry.duration_since(now) {
                     Ok(time_left) => {
                         let days_left = time_left.as_secs() / (24 * 60 * 60);
-                        info!("Certificate for {} expires in {} days", domain, days_left);
+                        info!("Certificate expires in {} days", days_left);
                         // Renew if less than 30 days left
                         Ok(days_left < 30)
                     }
                     Err(_) => {
                         // If expiry is in the past, we need to renew
-                        info!("Certificate for {} has already expired", domain);
+                        info!("Certificate has already expired");
                         Ok(true)
                     }
                 }
             }
             Err(e) => {
-                warn!("Error checking certificate expiry for {}: {}", domain, e);
+                warn!("Error checking certificate expiry: {}", e);
                 // If we can't read the certificate, assume it needs renewal
                 Ok(true)
             }
@@ -93,9 +93,9 @@ impl CertManager {
     }
 
     // Get certificate expiry time
-    fn get_expiry_time_internal(cert_path: &Path) -> Result<SystemTime> {
-        let cert_data = fs::read(cert_path)
-            .with_context(|| format!("Failed to read certificate file: {:?}", cert_path))?;
+    fn get_expiry_time(&self) -> Result<SystemTime> {
+        let cert_data = fs::read(&self.cert_path)
+            .with_context(|| format!("Failed to read certificate file: {:?}", self.cert_path))?;
 
         let mut reader = std::io::Cursor::new(&cert_data);
         let certs = rustls_pemfile::certs(&mut reader)
@@ -103,7 +103,7 @@ impl CertManager {
             .context("Failed to parse certificate")?;
 
         if certs.is_empty() {
-            anyhow::bail!("No certificates found in file: {:?}", cert_path);
+            anyhow::bail!("No certificates found in file: {:?}", self.cert_path);
         }
 
         // Get the first certificate's expiry time
@@ -218,12 +218,7 @@ impl CertManager {
         );
 
         // Check if certificate is expiring soon
-        let domain = self.domain.clone();
-        let cert_path = self.cert_path.clone();
-        let needs_renewal =
-            spawn_blocking(move || Self::needs_cert_renewal_internal(&domain, &cert_path))
-                .await
-                .map_err(|e| anyhow::anyhow!("certificate renewal check panicked: {e:?}"))??;
+        let needs_renewal = self.needs_cert_renewal()?;
 
         if !needs_renewal {
             info!("Certificate is still valid for more than 30 days, skipping renewal");
