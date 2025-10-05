@@ -419,10 +419,21 @@ impl FaastaServer {
 
         // Wait for response with a 10-minute timeout
         match receiver.await {
-            Ok(Ok(resp)) => {
-                task.detach();
-                Ok(resp)
-            }
+            Ok(Ok(resp)) => match task.await {
+                Ok(Ok(())) => Ok(resp),
+                Ok(Err(e)) => Err(e),
+                Err(panic) => {
+                    let message =
+                        if let Some(msg) = panic.downcast_ref::<String>().map(|s| s.clone()) {
+                            msg
+                        } else if let Some(msg) = panic.downcast_ref::<&'static str>() {
+                            (*msg).to_string()
+                        } else {
+                            "function task panicked".to_string()
+                        };
+                    Err(anyhow!(message))
+                }
+            },
             Ok(Err(err_code)) => {
                 error!("Function returned error: {:?}", err_code);
                 Err(anyhow!("Function error: {:?}", err_code))
