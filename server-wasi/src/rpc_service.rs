@@ -87,11 +87,8 @@ impl FunctionServiceImpl {
 
             if let Some(entry_bytes) = entry_result {
                 // Deserialize the function info
-                let function_info = match bincode::decode_from_slice::<FunctionInfo, _>(
-                    &entry_bytes,
-                    bincode::config::standard(),
-                ) {
-                    Ok((info, _)) => info,
+                let function_info = match bitcode::decode::<FunctionInfo>(&entry_bytes) {
+                    Ok(info) => info,
                     Err(e) => {
                         error!("Failed to deserialize function info: {}", e);
                         return Err(FunctionError::InternalError(format!(
@@ -186,11 +183,8 @@ impl FunctionServiceImpl {
             usage: format!("https://{name}.faasta.xyz or https://faasta.xyz/{name}"),
         };
 
-        // Serialize metadata with bincode
-        let meta =
-            bincode::encode_to_vec(&function_info, bincode::config::standard()).map_err(|e| {
-                FunctionError::InternalError(format!("Failed to serialize function metadata: {e}"))
-            })?;
+        // Serialize metadata with bitcode
+        let meta = bitcode::encode(&function_info);
         // Persist metadata to sled
         self.functions_tree
             .insert(name.as_bytes(), meta)
@@ -229,11 +223,8 @@ impl FunctionServiceImpl {
                 // Get function info from the functions tree
                 if let Ok(Some(value)) = self.functions_tree.get(project_name.as_bytes()) {
                     // Deserialize the function info
-                    match bincode::decode_from_slice::<FunctionInfo, _>(
-                        &value,
-                        bincode::config::standard(),
-                    ) {
-                        Ok((function_info, _)) => {
+                    match bitcode::decode::<FunctionInfo>(&value) {
+                        Ok(function_info) => {
                             user_functions.push(function_info);
                         }
                         Err(e) => {
@@ -281,11 +272,8 @@ impl FunctionServiceImpl {
 
         if let Some(entry_bytes) = entry_result {
             // Deserialize the function info
-            let function_info = match bincode::decode_from_slice::<FunctionInfo, _>(
-                &entry_bytes,
-                bincode::config::standard(),
-            ) {
-                Ok((info, _)) => info,
+            let function_info = match bitcode::decode::<FunctionInfo>(&entry_bytes) {
+                Ok(info) => info,
                 Err(e) => {
                     error!("Failed to deserialize function info: {}", e);
                     return Err(FunctionError::InternalError(format!(

@@ -5,12 +5,13 @@ use faasta_interface::{FunctionMetricsResponse, Metrics};
 use once_cell::sync::Lazy;
 use std::path::Path;
 use std::str;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info};
 
 // Global metrics storage using DashMap for lock-free concurrent access
-pub static FUNCTION_METRICS: Lazy<DashMap<String, FunctionMetric>> = Lazy::new(DashMap::new);
+pub static FUNCTION_METRICS: Lazy<DashMap<String, Arc<FunctionMetric>>> = Lazy::new(DashMap::new);
 
 // Sled database for persistent storage
 pub static METRICS_DB: Lazy<sled::Db> = Lazy::new(|| {
@@ -48,11 +49,8 @@ impl FunctionMetric {
 
         // Try to load from sled if it exists
         let metric = if let Ok(Some(data)) = METRICS_DB.get(function_name.as_bytes()) {
-            if let Ok(((total_time, call_count, last_called), _)) =
-                bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(
-                    &data,
-                    bincode::config::standard(),
-                )
+            if let Ok((total_time, call_count, last_called)) =
+                bitcode::decode::<(u64, u64, u64)>(&data)
             {
                 Self {
                     function_name,
@@ -110,17 +108,14 @@ impl FunctionMetric {
     }
 
     // Method to flush this individual function's metrics to the database
+    #[allow(dead_code)]
     pub fn flush_to_db(&self) {
         // Load existing DB values
         let existing = METRICS_DB
             .get(self.function_name.as_bytes())
             .unwrap_or(None);
         let (db_total, db_calls, db_last) = if let Some(db_bytes) = existing {
-            if let Ok(((t, c, l), _)) = bincode::decode_from_slice::<
-                (u64, u64, u64),
-                bincode::config::Configuration,
-            >(&db_bytes, bincode::config::standard())
-            {
+            if let Ok((t, c, l)) = bitcode::decode::<(u64, u64, u64)>(&db_bytes) {
                 info!(
                     "Found existing DB metrics for '{}': total={}ms, calls={}, last={}",
                     self.function_name, t, c, l
@@ -162,22 +157,16 @@ impl FunctionMetric {
         );
 
         // Combine and persist
-        if let Ok(data) = bincode::encode_to_vec(
-            (combined_total, combined_calls, combined_last),
-            bincode::config::standard(),
-        ) {
-            match METRICS_DB.insert(self.function_name.as_bytes(), data) {
-                Ok(_) => info!(
-                    "Successfully persisted metrics for '{}'",
-                    self.function_name
-                ),
-                Err(e) => error!(
-                    "Failed to persist metrics for '{}': {}",
-                    self.function_name, e
-                ),
-            }
-        } else {
-            error!("Failed to encode metrics for '{}'", self.function_name);
+        let data = bitcode::encode(&(combined_total, combined_calls, combined_last));
+        match METRICS_DB.insert(self.function_name.as_bytes(), data) {
+            Ok(_) => info!(
+                "Successfully persisted metrics for '{}'",
+                self.function_name
+            ),
+            Err(e) => error!(
+                "Failed to persist metrics for '{}': {}",
+                self.function_name, e
+            ),
         }
     }
 }
@@ -218,11 +207,8 @@ pub fn get_metrics() -> Metrics {
         };
 
         // Decode the DB metrics data
-        if let Ok(((db_total_time, db_call_count, db_last_called), _)) =
-            bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(
-                &value,
-                bincode::config::standard(),
-            )
+        if let Ok((db_total_time, db_call_count, db_last_called)) =
+            bitcode::decode::<(u64, u64, u64)>(&value)
         {
             info!(
                 "DB metrics for '{}': total={}ms, calls={}, last={}",
@@ -296,15 +282,12 @@ pub fn get_metrics() -> Metrics {
 }
 
 // Helper function to get or create a function metric
-pub fn get_or_create_metric(function_name: &str) -> Option<FunctionMetric> {
+pub fn get_or_create_metric(function_name: &str) -> Option<Arc<FunctionMetric>> {
     // Use entry API to reduce lock contention
     let entry = FUNCTION_METRICS.entry(function_name.to_string());
 
     match entry {
-        dashmap::mapref::entry::Entry::Occupied(occupied) => {
-            // Return a clone of the existing metric
-            Some(FunctionMetric::new(occupied.key().clone()))
-        }
+        dashmap::mapref::entry::Entry::Occupied(occupied) => Some(occupied.get().clone()),
         dashmap::mapref::entry::Entry::Vacant(vacant) => {
             // First check if the function's WASM file exists
             if !function_wasm_exists(function_name) {
@@ -314,7 +297,7 @@ pub fn get_or_create_metric(function_name: &str) -> Option<FunctionMetric> {
             debug!("Creating new metric for function: {}", function_name);
 
             // Create the new metric
-            let metric = FunctionMetric::new(function_name.to_string());
+            let metric = Arc::new(FunctionMetric::new(function_name.to_string()));
 
             // Insert it into the map
             vacant.insert(metric.clone());
@@ -331,18 +314,14 @@ pub fn get_or_create_metric(function_name: &str) -> Option<FunctionMetric> {
                     .as_millis() as u64;
 
                 // Initialize with zeros
-                let initial_data =
-                    match bincode::encode_to_vec((0u64, 0u64, now), bincode::config::standard()) {
-                        Ok(data) => data,
-                        Err(e) => {
-                            error!(
-                                "Failed to encode initial metrics for new function {}: {}",
-                                function_name, e
-                            );
-                            return None;
-                        }
-                    };
-                let _ = METRICS_DB.insert(function_name.as_bytes(), initial_data);
+                let initial_data = bitcode::encode(&(0u64, 0u64, now));
+                if let Err(e) = METRICS_DB.insert(function_name.as_bytes(), initial_data) {
+                    error!(
+                        "Failed to store initial metrics for new function {}: {}",
+                        function_name, e
+                    );
+                    return None;
+                }
                 debug!("Added new function '{}' to metrics database", function_name);
             }
 
@@ -385,12 +364,13 @@ impl Drop for Timer {
 }
 
 /// Flush in-memory metrics to persistent DB and reset counters.
+#[allow(dead_code)]
 pub fn flush_metrics_to_db() {
     info!("Flushing metrics to database...");
     let mut flushed_count = 0;
 
     for entry in FUNCTION_METRICS.iter() {
-        let metric = entry.value(); // We only need the metric, not the key
+        let metric = entry.value().clone();
         let function_name = &metric.function_name;
         let call_count = metric.call_count.load(Ordering::Relaxed);
         let total_time = metric.total_time.load(Ordering::Relaxed);
@@ -440,6 +420,7 @@ pub fn flush_metrics_to_db() {
 }
 
 /// Spawn a background task to periodically flush metrics to DB every `interval_secs` seconds.
+#[allow(dead_code)]
 pub fn spawn_periodic_flush(interval_secs: u64) {
     spawn(async move {
         let mut ticker = interval(Duration::from_secs(interval_secs));

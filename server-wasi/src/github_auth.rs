@@ -1,5 +1,5 @@
 use anyhow::Result;
-use bincode::{Decode, Encode};
+use bitcode::{Decode, Encode};
 use cyper::Client as HttpClient;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
@@ -30,10 +30,8 @@ impl GitHubAuth {
         // Iterate through all items in the tree
         for item in user_tree.iter().flatten() {
             if let Ok(username) = std::str::from_utf8(&item.0) {
-                // Try to decode using bincode
-                if let Ok((user_data, _)) =
-                    bincode::decode_from_slice::<UserData, _>(&item.1, bincode::config::standard())
-                {
+                // Try to decode using bitcode
+                if let Ok(user_data) = bitcode::decode::<UserData>(&item.1) {
                     user_projects.insert(username.to_string(), user_data);
                 }
             }
@@ -159,7 +157,7 @@ impl GitHubAuth {
 
         // Save to database
         let user_tree = self.db.open_tree(USER_DB_TREE)?;
-        let encoded = bincode::encode_to_vec(&user_data, bincode::config::standard())?;
+        let encoded = bitcode::encode(&user_data);
         user_tree.insert(username.as_bytes(), encoded)?;
 
         Ok(())
@@ -175,7 +173,7 @@ impl GitHubAuth {
             // Save to database
             let user_tree = self.db.open_tree(USER_DB_TREE)?;
             let user_data_clone = user_data.clone();
-            let encoded = bincode::encode_to_vec(&user_data_clone, bincode::config::standard())?;
+            let encoded = bitcode::encode(&user_data_clone);
             user_tree.insert(username.as_bytes(), encoded)?;
         }
 

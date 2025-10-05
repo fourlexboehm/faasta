@@ -21,8 +21,8 @@ use wasi_server::SERVER;
 
 use compio::net::TcpListener;
 use compio::runtime::spawn;
+use compio::rustls::ServerConfig;
 use compio::tls::TlsAcceptor;
-use rustls::ServerConfig;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -112,11 +112,6 @@ async fn load_tls_config(args: &Args) -> Result<Arc<ServerConfig>> {
 
 #[compio::main]
 async fn main() -> anyhow::Result<()> {
-    // Install default crypto provider for rustls
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .expect("Failed to install crypto provider");
-
     // Load environment variables from .env file if present
     let _ = dotenvy::dotenv();
 
@@ -241,9 +236,6 @@ async fn main() -> anyhow::Result<()> {
 
     // Store server in global OnceCell for cache management
     let _ = SERVER.set(server_instance);
-
-    // Spawn a background task to flush metrics to DB
-    metrics::spawn_periodic_flush(60 * 30);
 
     // Load TLS configuration with timing
     info!("Loading TLS configuration...");
