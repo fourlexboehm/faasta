@@ -1396,6 +1396,7 @@ name = "faasta-interface"
 version = "0.2.0"
 dependencies = [
  "bincode",
+ "bitcode",
  "bitrpc",
  "serde",
  "thiserror 1.0.69",
