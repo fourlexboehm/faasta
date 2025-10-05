@@ -419,7 +419,10 @@ impl FaastaServer {
 
         // Wait for response with a 10-minute timeout
         match receiver.await {
-            Ok(Ok(resp)) => Ok(resp),
+            Ok(Ok(resp)) => {
+                task.detach();
+                Ok(resp)
+            }
             Ok(Err(err_code)) => {
                 error!("Function returned error: {:?}", err_code);
                 Err(anyhow!("Function error: {:?}", err_code))
