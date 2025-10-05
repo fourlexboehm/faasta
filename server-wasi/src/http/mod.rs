@@ -3,6 +3,7 @@ use compio::BufResult;
 use compio::io::{AsyncWrite, AsyncWriteExt};
 use compio::net::TcpListener;
 use compio::runtime::spawn;
+use compio::time::timeout;
 use compio::tls::TlsAcceptor;
 use compio_dispatcher::Dispatcher;
 use cyper_core::{CompioExecutor, CompioTimer, HyperStream};
@@ -14,6 +15,7 @@ use hyper::service::service_fn;
 use hyper_util::server::conn::auto::Builder;
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{error, info};
 
 use crate::wasi_server::SERVER;
@@ -100,12 +102,13 @@ pub async fn run_https_server(
         let tls_acceptor = tls_acceptor.clone();
         let dispatcher = dispatcher.clone();
         match dispatcher.dispatch(move || async move {
-            // Perform TLS handshake
-            match tls_acceptor.accept(stream).await {
-                Ok(tls_stream) => {
+            // Perform TLS handshake with timeout
+            match timeout(Duration::from_secs(5), tls_acceptor.accept(stream)).await {
+                Ok(Ok(tls_stream)) => {
                     info!("TLS handshake successful with {}", peer_addr);
 
                     // Create a service function for handling HTTP requests
+                    let header_timeout = Duration::from_secs(5);
                     let service = service_fn(move |req: Request<Incoming>| {
                         async move {
                             match SERVER.get().unwrap().handle_request(req).await {
@@ -117,7 +120,6 @@ pub async fn run_https_server(
                                         Ok(resp) => Ok(resp),
                                         Err(err) => {
                                             error!("Failed to create error response: {}", err);
-                                            // Fall back to a minimal hard-coded response if everything else fails
                                             let error_text = "Internal Server Error".to_string();
                                             let body = Full::new(Bytes::from(error_text))
                                                 .map_err(|never: Infallible| match never {})
@@ -138,14 +140,17 @@ pub async fn run_https_server(
                     // Serve the HTTP connection directly with hyper using compio executor
                     let hyper_stream = HyperStream::new(tls_stream);
                     let mut builder = Builder::new(CompioExecutor);
-                    builder.http1().timer(CompioTimer::default());
+                    builder.http1().timer(CompioTimer::default()).header_read_timeout(header_timeout);
                     builder.http2().timer(CompioTimer::default());
                     if let Err(err) = builder.serve_connection(hyper_stream, service).await {
                         error!("Error serving connection from {}: {}", peer_addr, err);
                     }
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     error!("TLS handshake failed with {}: {}", peer_addr, e);
+                }
+                Err(_) => {
+                    error!("TLS handshake timed out with {}", peer_addr);
                 }
             }
         }) {
