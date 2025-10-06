@@ -81,32 +81,74 @@ pub async fn run_http_server(http_listener: TcpListener, dispatcher: Arc<Dispatc
     }
 }
 
-/// Runs the HTTPS server
+/// Runs the HTTPS server with improved resource management
 pub async fn run_https_server(
     listener: TcpListener,
     tls_acceptor: TlsAcceptor,
     dispatcher: Arc<Dispatcher>,
 ) {
     info!("HTTPS server listening for connections");
+    
+    // Track consecutive errors for backoff
+    let consecutive_errors = Arc::new(AtomicU64::new(0));
+    let max_consecutive_errors = 10;
+    
+    // Track active connections to prevent resource exhaustion
+    let active_connections = Arc::new(AtomicU64::new(0));
+    let max_connections = 10000;
 
     loop {
+        // Check if we're at connection limit
+        let current_connections = active_connections.load(Ordering::Relaxed);
+        if current_connections >= max_connections {
+            warn!("At maximum connection limit ({}), applying backoff", max_connections);
+            sleep(Duration::from_millis(100)).await;
+            continue;
+        }
+
         // Accept incoming connection
         let (stream, peer_addr) = match listener.accept().await {
-            Ok(conn) => conn,
+            Ok(conn) => {
+                // Reset error counter on successful accept
+                consecutive_errors.store(0, Ordering::Relaxed);
+                conn
+            }
             Err(e) => {
                 error!("Failed to accept connection: {}", e);
+                
+                // Increment error counter and apply backoff
+                let error_count = consecutive_errors.fetch_add(1, Ordering::Relaxed) + 1;
+                if error_count > max_consecutive_errors {
+                    error!("Too many consecutive accept errors ({}), applying backoff", error_count);
+                    sleep(Duration::from_millis(100 * error_count.min(50))).await;
+                }
+                
+                // Brief sleep to prevent tight loop on persistent errors
+                sleep(Duration::from_millis(10)).await;
                 continue;
             }
         };
-        info!("Accepted connection from {}", peer_addr);
+        
+        // Increment active connections
+        active_connections.fetch_add(1, Ordering::Relaxed);
+        info!("Accepted connection from {} (active: {})", peer_addr, current_connections + 1);
 
         let tls_acceptor = tls_acceptor.clone();
         let dispatcher = dispatcher.clone();
+        let consecutive_errors_clone = consecutive_errors.clone();
+        let active_connections_clone = active_connections.clone();
+        
         match dispatcher.dispatch(move || async move {
+            // Ensure we decrement active connections on exit
+            let _guard = ConnectionGuard { active_connections: active_connections_clone.clone() };
+            
             // Perform TLS handshake with timeout
-            match timeout(Duration::from_secs(5), tls_acceptor.accept(stream)).await {
+            match timeout(Duration::from_secs(10), tls_acceptor.accept(stream)).await {
                 Ok(Ok(tls_stream)) => {
                     info!("TLS handshake successful with {}", peer_addr);
+                    
+                    // Reset error counter on successful handshake
+                    consecutive_errors_clone.store(0, Ordering::Relaxed);
 
                     // Create a service function for handling HTTP requests
                     let header_timeout = Duration::from_secs(5);
@@ -172,7 +214,8 @@ pub async fn run_https_server(
             Err(err) => {
                 error!(?err, "Failed to dispatch HTTPS task");
                 // Decrement connection count since dispatch failed
-                active_connections.fetch_sub(1, Ordering::Relaxed);
+                let active = active_connections.clone();
+                active.fetch_sub(1, Ordering::Relaxed);
             }
         }
     }
