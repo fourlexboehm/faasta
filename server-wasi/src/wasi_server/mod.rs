@@ -1,12 +1,18 @@
 use anyhow::{Result, anyhow, bail};
 use bytes::Bytes;
 use compio::runtime::spawn;
+use compio::time::sleep;
+use futures_util::future::Either;
+use futures_util::{future::select, pin_mut};
 use http_body_util::{BodyExt, Full};
 use hyper::{Method, Request, Response, header::HOST};
 use moka::future::Cache;
 use once_cell::sync::OnceCell;
 use std::sync::Arc;
-use std::{path::PathBuf, time::Instant};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
 use tokio::sync::oneshot;
 use tracing::{debug, error, info};
 use wasmtime::{
@@ -89,6 +95,8 @@ pub struct FaastaServer {
     pub functions_dir: PathBuf,
     pub github_auth: GitHubAuth,
 }
+
+const BODY_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl FaastaServer {
     pub async fn new(
@@ -190,11 +198,29 @@ impl FaastaServer {
                     };
 
                     // Read the body as WASM bytes
-                    let wasm_bytes = match http_body_util::BodyExt::collect(req.into_body()).await {
-                        Ok(collected) => collected.to_bytes().to_vec(),
-                        Err(e) => {
+                    let body_future = http_body_util::BodyExt::collect(req.into_body());
+                    let (timeout_tx, timeout_rx) = oneshot::channel();
+                    spawn(async move {
+                        sleep(BODY_READ_TIMEOUT).await;
+                        let _ = timeout_tx.send(());
+                    })
+                    .detach();
+
+                    pin_mut!(body_future);
+                    let timeout_future = async {
+                        let _ = timeout_rx.await;
+                    };
+                    pin_mut!(timeout_future);
+
+                    let wasm_bytes = match select(body_future, timeout_future).await {
+                        Either::Left((Ok(collected), _)) => collected.to_bytes().to_vec(),
+                        Either::Left((Err(e), _)) => {
                             error!("Failed to read request body: {}", e);
                             return text_response(400, "Failed to read request body");
+                        }
+                        Either::Right(_) => {
+                            error!("Timed out reading publish request body");
+                            return text_response(408, "Request body timed out");
                         }
                     };
 

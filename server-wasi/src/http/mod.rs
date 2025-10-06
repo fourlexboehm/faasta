@@ -3,7 +3,7 @@ use compio::BufResult;
 use compio::io::{AsyncWrite, AsyncWriteExt};
 use compio::net::TcpListener;
 use compio::runtime::spawn;
-use compio::time::timeout;
+use compio::time::{timeout, sleep};
 use compio::tls::TlsAcceptor;
 use compio_dispatcher::Dispatcher;
 use cyper_core::{CompioExecutor, CompioTimer, HyperStream};
@@ -15,8 +15,9 @@ use hyper::service::service_fn;
 use hyper_util::server::conn::auto::Builder;
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::wasi_server::SERVER;
 use crate::wasi_server::text_response;
@@ -148,9 +149,15 @@ pub async fn run_https_server(
                 }
                 Ok(Err(e)) => {
                     error!("TLS handshake failed with {}: {}", peer_addr, e);
+                    
+                    // Apply brief delay to avoid CPU spinning on repeated TLS errors
+                    sleep(Duration::from_millis(50)).await;
                 }
                 Err(_) => {
                     error!("TLS handshake timed out with {}", peer_addr);
+                    
+                    // Apply delay for timeout scenarios
+                    sleep(Duration::from_millis(100)).await;
                 }
             }
         }) {
@@ -164,7 +171,20 @@ pub async fn run_https_server(
             }
             Err(err) => {
                 error!(?err, "Failed to dispatch HTTPS task");
+                // Decrement connection count since dispatch failed
+                active_connections.fetch_sub(1, Ordering::Relaxed);
             }
         }
+    }
+}
+
+// Helper struct to ensure connection count is decremented
+struct ConnectionGuard {
+    active_connections: Arc<AtomicU64>,
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        self.active_connections.fetch_sub(1, Ordering::Relaxed);
     }
 }

@@ -98,11 +98,24 @@ async fn load_tls_config(args: &Args) -> Result<Arc<ServerConfig>> {
     let key = rustls_pemfile::private_key(&mut key_reader)?
         .ok_or_else(|| anyhow::anyhow!("No private key found in TLS key file"))?;
 
-    // Build TLS config
-    let config = ServerConfig::builder()
+    // Build TLS config with improved settings
+    let mut config = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .context("Failed to build TLS server config")?;
+    
+    // Set session cache to prevent memory leaks from unbounded session storage
+    config.session_storage = rustls::server::ServerSessionMemoryCache::new(4096);
+    
+    // Enable ALPN for HTTP/2
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    
+    // Set max early data size to 0 to disable 0-RTT (prevents replay attacks)
+    config.max_early_data_size = 0;
+    
+    // Send fewer intermediate certificates to reduce handshake size
+    config.send_tls13_tickets = 2;
+    
 
     Ok(Arc::new(config))
 }
