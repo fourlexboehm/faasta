@@ -191,15 +191,11 @@ pub async fn run_https_server(
                 }
                 Ok(Err(e)) => {
                     error!("TLS handshake failed with {}: {}", peer_addr, e);
-                    
-                    // Apply brief delay to avoid CPU spinning on repeated TLS errors
-                    sleep(Duration::from_millis(50)).await;
+                    // Connection will be dropped here, closing the socket
                 }
                 Err(_) => {
                     error!("TLS handshake timed out with {}", peer_addr);
-                    
-                    // Apply delay for timeout scenarios
-                    sleep(Duration::from_millis(100)).await;
+                    // Connection will be dropped here, closing the socket
                 }
             }
         }) {

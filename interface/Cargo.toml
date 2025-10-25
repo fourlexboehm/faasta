@@ -7,7 +7,7 @@ license = "MIT"
 
 [dependencies]
 bincode = "2"
-bitrpc = { version = "0.2.0", features = ["compio-server"] }
+bitrpc = { version = "0.3", features = ["compio-server"] }
 bitcode = "0.6.7"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"

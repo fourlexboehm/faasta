@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1"
 bincode = "2"
-bitrpc = { version = "0.2.0", features = ["compio-server"] }
+bitrpc = { version = "0.3.0", features = ["compio-server"] }
 bytes = "1"
 chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }

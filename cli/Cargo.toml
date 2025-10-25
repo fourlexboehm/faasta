@@ -1,6 +1,6 @@
 [package]
 name = "cargo-faasta"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 description = "Build and deploy wasi-http wasm to the faasta serverless platform"
@@ -10,7 +10,7 @@ description = "Build and deploy wasi-http wasm to the faasta serverless platform
 
 [dependencies]
 anyhow.workspace = true
-bitrpc = { version = "0.2.0", features = ["cyper"] }
+bitrpc = { version = "0.3", features = ["cyper"] }
 clap = { version = "4", features = ["derive"] }
 clap-cargo = "0.18"
 compio = { version = "0.16.0", features = ["macros", "time"] }
@@ -25,5 +25,5 @@ open = "5"
 serde = { version = "1.0", features = ["derive"] }
 serde_json.workspace = true
 tiny_http = "0.12.0"
-tracing = "0.1.40"
-url = "2.5.0"
+tracing = "0.1.41"
+url = "2.5.7"
