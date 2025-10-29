@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"fn":["flush_metrics_to_db","function_wasm_exists","get_metrics","get_or_create_metric","spawn_periodic_flush"],"static":["FUNCTION_METRICS","METRICS_DB"],"struct":["FunctionMetric","Timer"]};

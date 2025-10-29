@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"attr":["faasta"],"fn":["is_faasta_response","last_path_segment"]};

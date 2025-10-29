@@ -1,2 +1,2 @@
-createSrcSidebar('[["cargo_faasta",["",[],["auth.rs","github_oauth.rs","init.rs","lib.rs","run.rs"]]],["faasta_interface",["",[],["lib.rs"]]],["server_wasi",["",[["http",[],["mod.rs"]],["quic",[],["mod.rs"]],["wasi_server",[],["mod.rs"]]],["cert_manager.rs","github_auth.rs","main.rs","metrics.rs","rpc_service.rs"]]]]');
-//{"start":19,"fragment_lengths":[82,40,176]}
+createSrcSidebar('[["cargo_faasta",["",[],["auth.rs","github_oauth.rs","init.rs","lib.rs","run.rs"]]],["faasta_interface",["",[],["lib.rs"]]],["faasta_macros",["",[],["lib.rs"]]],["faasta_types",["",[],["lib.rs"]]],["server",["",[["quic",[],["mod.rs"]],["wasi_server",[],["mod.rs"]]],["cert_manager.rs","github_auth.rs","kvm_guest.rs","main.rs","metrics.rs","rpc_service.rs"]]]]');
+//{"start":19,"fragment_lengths":[82,40,37,36,163]}
