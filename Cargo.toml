@@ -1,7 +1,13 @@
 [workspace]
 resolver = "2"
 edition = '2024'
-members = ["cli", "interface", "server-wasi"]
+members = [
+    "cli",
+    "interface",
+    "server",
+    "macros",
+    "faasta-types"
+]
 exclude = ["function", "**/builds"]
 
 [workspace.dependencies]

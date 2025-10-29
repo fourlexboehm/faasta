@@ -8,9 +8,9 @@ description = "Official website for the Faasta project using WASI-HTTP"
 crate-type = ["cdylib"]
 
 [dependencies]
-anyhow = "1"
-http = "1"
-spin-sdk = "3"
+cap-async-std = { version = "3.4.2", features = ["tokio1"] }
+faasta-macros = { path = "../../macros" }
+faasta-types = { path = "../../faasta-types" }
 maud = "0.27"
 
 # reduce wasm binary size

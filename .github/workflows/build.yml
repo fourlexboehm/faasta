@@ -24,8 +24,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         
-      - name: Build server-wasi (Linux)
-        run: cargo build --release --package server-wasi
+      - name: Build server (Linux)
+        run: cargo build --release --package server
       
       - name: Build cargo-faasta CLI (Linux)
         run: cargo build --release --package cargo-faasta
@@ -35,7 +35,7 @@ jobs:
       
       - name: Prepare artifacts
         run: |
-          cp target/release/server-wasi target/artifacts/faasta-server-linux-x86_64
+          cp target/release/server target/artifacts/faasta-server-linux-x86_64
           cp target/release/cargo-faasta target/artifacts/cargo-faasta-linux-x86_64
       
       - name: Upload Linux artifacts
@@ -58,8 +58,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         
-      - name: Build server-wasi (macOS)
-        run: cargo build --release --package server-wasi
+      - name: Build server (macOS)
+        run: cargo build --release --package server
       
       - name: Build cargo-faasta CLI (macOS)
         run: cargo build --release --package cargo-faasta
@@ -69,7 +69,7 @@ jobs:
       
       - name: Prepare artifacts
         run: |
-          cp target/release/server-wasi target/artifacts/faasta-server-macos-x86_64
+          cp target/release/server target/artifacts/faasta-server-macos-x86_64
           cp target/release/cargo-faasta target/artifacts/cargo-faasta-macos-x86_64
       
       - name: Upload macOS artifacts
@@ -92,8 +92,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         
-      - name: Build server-wasi (macOS ARM)
-        run: cargo build --release --package server-wasi
+      - name: Build server (macOS ARM)
+        run: cargo build --release --package server
       
       - name: Build cargo-faasta CLI (macOS ARM)
         run: cargo build --release --package cargo-faasta
@@ -103,7 +103,7 @@ jobs:
       
       - name: Prepare artifacts
         run: |
-          cp target/release/server-wasi target/artifacts/faasta-server-macos-arm64
+          cp target/release/server target/artifacts/faasta-server-macos-arm64
           cp target/release/cargo-faasta target/artifacts/cargo-faasta-macos-arm64
       
       - name: Upload macOS ARM artifacts

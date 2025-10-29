@@ -32,8 +32,8 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         
-      - name: Build server-wasi
-        run: cargo build --release --package server-wasi --target ${{ matrix.target }}
+      - name: Build server
+        run: cargo build --release --package server --target ${{ matrix.target }}
       
       - name: Build cargo-faasta CLI
         run: cargo build --release --package cargo-faasta --target ${{ matrix.target }}
@@ -44,7 +44,7 @@ jobs:
       
       - name: Prepare artifacts
         run: |
-          cp target/${{ matrix.target }}/release/server-wasi${{ matrix.extension || '' }} target/artifacts/${{ matrix.artifact_prefix }}-server${{ matrix.extension || '' }}
+          cp target/${{ matrix.target }}/release/server${{ matrix.extension || '' }} target/artifacts/${{ matrix.artifact_prefix }}-server${{ matrix.extension || '' }}
           cp target/${{ matrix.target }}/release/cargo-faasta${{ matrix.extension || '' }} target/artifacts/${{ matrix.artifact_prefix }}-cli${{ matrix.extension || '' }}
         shell: bash
       

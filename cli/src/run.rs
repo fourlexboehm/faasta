@@ -185,7 +185,7 @@ pub fn get_project_info() -> Result<(PathBuf, String, PathBuf), io::Error> {
 /// Build the project for wasm32-wasip2 target
 pub fn build_project(package_root: &PathBuf) -> Result<(), io::Error> {
     let spinner = indicatif::ProgressBar::new_spinner();
-    spinner.set_message("Building optimized WASI component...");
+    spinner.set_message("Building optimized x86_64 binary...");
     spinner.enable_steady_tick(std::time::Duration::from_millis(100));
 
     // Validate the project structure
@@ -196,14 +196,19 @@ pub fn build_project(package_root: &PathBuf) -> Result<(), io::Error> {
         exit(1);
     }
 
-    // Build with wasm32-wasip2 target
     let status = std::process::Command::new("cargo")
-        .args(["build", "--release", "--target", "wasm32-wasip2"])
+        .args(["zigbuild", "--release", "--target", "x86_64-unknown-linux-gnu"])
         .current_dir(package_root)
         .status()
         .unwrap_or_else(|e| {
             spinner.finish_and_clear();
-            eprintln!("Failed to run cargo build: {e}");
+            eprintln!("Failed to run cargo zigbuild, did you install it?: {e}");
+            let _status = std::process::Command::new("cargo")
+                .args(["binstall", "cargo-zigbuild"]).status().unwrap_or_else(|e| {
+                eprintln!("Failed to run cargo binstall, did you install it?: {e}");
+                std::process::Command::new("cargo")
+                .args(["install", "cargo-zigbuild"]).status().unwrap_or_else(|_e| std::process::exit(1))
+            });
             exit(1);
         });
 

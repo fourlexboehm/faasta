@@ -1,51 +1,77 @@
-use waki::Client;
-use waki::{handler, ErrorCode, Request, Response};
+use cap_async_std::fs::Dir;
+use faasta_macros::faasta;
+use faasta_types::{FaastaRequest, FaastaResponse};
+use reqwest::Client;
+use serde::Serialize;
+use serde_json::json;
+use url::form_urlencoded;
 
-// External API proxy endpoint
-#[handler]
-fn external_api(req: Request) -> Result<Response, ErrorCode> {
-    // Get the API endpoint from query parameters
-    let query = req.query();
-    let default_endpoint = "get".to_string();
-    let endpoint = query.get("endpoint").unwrap_or(&default_endpoint);
+#[derive(Serialize)]
+struct ProxyResponse {
+    endpoint: String,
+    upstream_status: u16,
+    upstream_body: serde_json::Value,
+}
 
-    // Create a new HTTP client
+fn parse_query(uri: &str) -> std::collections::HashMap<String, String> {
+    uri.splitn(2, '?')
+        .nth(1)
+        .map(|query| form_urlencoded::parse(query.as_bytes()).into_owned().collect())
+        .unwrap_or_default()
+}
+
+fn json_response(status: u16, payload: serde_json::Value) -> FaastaResponse {
+    FaastaResponse::new(status)
+        .header("content-type", "application/json")
+        .with_body(payload.to_string().into_bytes())
+}
+
+#[faasta]
+pub async fn proxy_httpbin(request: FaastaRequest, _dir: Dir) -> FaastaResponse {
+    let FaastaRequest { uri, .. } = request;
+    let uri_string = uri.as_str().to_string();
+    let params = parse_query(&uri_string);
+    let endpoint = params
+        .get("endpoint")
+        .cloned()
+        .unwrap_or_else(|| "get".to_string());
+
+    let url = format!("https://httpbin.org/{endpoint}");
     let client = Client::new();
 
-    // Build the URL for the external API
-    let url = format!("https://httpbin.org/{}", endpoint);
-
-    // Make the request to the external API
-    let external_response = match client.get(&url).send() {
+    let upstream = match client.get(&url).send().await {
         Ok(resp) => resp,
-        Err(_) => {
-            return Response::builder()
-                .status_code(500) // Internal Server Error
-                .body("Failed to connect to external API")
-                .build()
-                .map_err(|_| ErrorCode::InternalError(None));
+        Err(err) => {
+            return json_response(
+                502,
+                json!({
+                    "error": "failed to reach upstream",
+                    "details": err.to_string(),
+                }),
+            );
         }
     };
 
-    // Get the status code from the external response
-    let status_code = external_response.status_code();
-
-    // Get the body from the external response
-    let body = match external_response.body() {
-        Ok(body) => body,
-        Err(_) => {
-            return Response::builder()
-                .status_code(500) // Internal Server Error
-                .body("Failed to read response body from external API")
-                .build()
-                .map_err(|_| ErrorCode::InternalError(None));
+    let status = upstream.status().as_u16();
+    let body_json = match upstream.json::<serde_json::Value>().await {
+        Ok(json) => json,
+        Err(err) => {
+            return json_response(
+                502,
+                json!({
+                    "error": "failed to decode upstream response",
+                    "details": err.to_string(),
+                }),
+            );
         }
     };
 
-    // Return the response from the external API
-    Response::builder()
-        .status_code(status_code)
-        .body(body)
-        .build()
-        .map_err(|_| ErrorCode::InternalError(None))
+    json_response(
+        200,
+        json!(ProxyResponse {
+            endpoint,
+            upstream_status: status,
+            upstream_body: body_json,
+        }),
+    )
 }

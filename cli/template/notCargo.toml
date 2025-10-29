@@ -7,13 +7,11 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-anyhow = "1"
-http = "1"
-spin-sdk = "3"
-
-# reduce wasm binary size
-[profile.release]
-lto = true
-strip = "symbols"
+cap-async-std = { version = "3.4.2", features = ["tokio1"] }
+faasta-macros = "0.1.7"
+faasta-types = "0.1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
 
 [workspace]

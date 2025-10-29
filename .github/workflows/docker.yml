@@ -51,16 +51,16 @@ jobs:
           COPY . .
           RUN apt-get update && apt-get install -y pkg-config libssl-dev
           RUN rustup target add wasm32-wasip2
-          RUN cargo build --release --package server-wasi
+          RUN cargo build --release --package server
 
           FROM debian:bookworm-slim
           WORKDIR /app
           RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
-          COPY --from=builder /app/target/release/server-wasi /app/server-wasi
+          COPY --from=builder /app/target/release/server /app/server
           EXPOSE 8080
           EXPOSE 9090
           VOLUME ["/app/data"]
-          ENTRYPOINT ["/app/server-wasi"]
+          ENTRYPOINT ["/app/server"]
           EOF
 
       - name: Build and push Docker image

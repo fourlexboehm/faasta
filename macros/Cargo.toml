@@ -1,0 +1,16 @@
+[package]
+name = "faasta-macros"
+version = "0.1.7"
+edition = "2024"
+license = "MIT"
+description = "Proc macros for Faasta"
+
+[dependencies]
+quote = "1"
+syn = { version = "2", features = ["full", "visit"] }
+
+[features]
+default = []
+
+[lib]
+proc-macro = true

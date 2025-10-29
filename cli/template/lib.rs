@@ -1,61 +1,81 @@
-use spin_sdk::http::{IntoResponse, Response};
-use spin_sdk::http_component;
+use std::collections::HashMap;
 
-/// A simple Spin HTTP component.
-#[http_component]
-fn hello_world(req: http::Request<()>) -> anyhow::Result<impl IntoResponse> {
-    // Extract query parameters
-    let query = req.uri().query().unwrap_or("");
-    let name = query
-        .split('&')
-        .find_map(|pair| {
-            let mut parts = pair.split('=');
-            if parts.next() == Some("name") {
-                parts.next()
-            } else {
-                None
-            }
-        })
-        .unwrap_or("World");
+use cap_async_std::fs::Dir;
+use faasta_macros::faasta;
+use faasta_types::{FaastaRequest, FaastaResponse};
+use serde::Serialize;
+use serde_json::json;
+use url::form_urlencoded;
 
-    // Extract path from the URL
-    let path = req.uri().path();
+#[derive(Serialize)]
+struct EchoResponse {
+    greeting: String,
+    method: String,
+    uri: String,
+    query: HashMap<String, String>,
+    headers: HashMap<String, String>,
+    body: Option<String>,
+}
 
-    // Get user agent
-    let user_agent = req
-        .headers()
-        .get(http::header::USER_AGENT)
-        .map(|h| h.to_str().unwrap_or("Unknown"))
-        .unwrap_or("Unknown");
+fn method_name(code: u8) -> &'static str {
+    match code {
+        0 => "GET",
+        1 => "POST",
+        2 => "PUT",
+        3 => "DELETE",
+        4 => "PATCH",
+        5 => "HEAD",
+        6 => "OPTIONS",
+        _ => "UNKNOWN",
+    }
+}
 
-    // Build response with HTML
-    let html = format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>Faasta HTTP Example</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }}
-        h1 {{ color: #333; }}
-        .info {{ background-color: #f5f5f5; padding: 15px; border-radius: 5px; }}
-        .highlight {{ color: #0066cc; font-weight: bold; }}
-    </style>
-</head>
-<body>
-    <h1>Hello, {}!</h1>
-    <div class="info">
-        <p>You accessed path: <span class="highlight">{}</span></p>
-        <p>Your User-Agent: <span class="highlight">{}</span></p>
-        <p>This function is running on Faasta with subdomain routing!</p>
-    </div>
-</body>
-</html>"#,
-        name, path, user_agent
-    );
+fn parse_query(uri: &str) -> HashMap<String, String> {
+    uri.splitn(2, '?')
+        .nth(1)
+        .map(|query| form_urlencoded::parse(query.as_bytes()).into_owned().collect())
+        .unwrap_or_default()
+}
 
-    Ok(Response::builder()
-        .status(200)
-        .header("content-type", "text/html")
-        .body(html)
-        .build())
+#[faasta]
+pub async fn hello_world(request: FaastaRequest, _dir: Dir) -> FaastaResponse {
+    let FaastaRequest {
+        method,
+        uri,
+        headers,
+        body,
+    } = request;
+
+    let uri_string = uri.as_str().to_string();
+    let query = parse_query(&uri_string);
+    let headers_map: HashMap<String, String> = headers
+        .iter()
+        .map(|header| (
+            header.name.as_str().to_string(),
+            header.value.as_str().to_string(),
+        ))
+        .collect();
+
+    let body_text = {
+        let bytes: Vec<u8> = body.iter().copied().collect();
+        let text = String::from_utf8_lossy(&bytes).trim().to_string();
+        if text.is_empty() {
+            None
+        } else {
+            Some(text)
+        }
+    };
+
+    let payload = EchoResponse {
+        greeting: format!("Hello, {}!", query.get("name").cloned().unwrap_or_else(|| "World".to_string())),
+        method: method_name(method).to_string(),
+        uri: uri_string,
+        query,
+        headers: headers_map,
+        body: body_text.clone(),
+    };
+
+    FaastaResponse::new(200)
+        .header("content-type", "application/json")
+        .with_body(json!(payload).to_string().into_bytes())
 }
