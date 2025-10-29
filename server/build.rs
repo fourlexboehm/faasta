@@ -9,7 +9,7 @@ fn main() {
     let mut build = cc::Build::new();
 
     if target_arch == "x86_64" {
-        let source = Path::new("../kvmserver/src/api/libkvmserverguest.c");
+        let source = Path::new("libkvmserverguest.c");
         if !source.exists() {
             panic!("kvmserver guest source not found at {}", source.display());
         }
