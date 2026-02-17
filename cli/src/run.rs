@@ -197,18 +197,27 @@ pub fn build_project(package_root: &PathBuf) -> Result<(), io::Error> {
     }
 
     let status = std::process::Command::new("cargo")
-        .args(["zigbuild", "--release", "--target", "x86_64-unknown-linux-gnu"])
+        .args([
+            "zigbuild",
+            "--release",
+            "--target",
+            "x86_64-unknown-linux-gnu",
+        ])
         .current_dir(package_root)
         .status()
         .unwrap_or_else(|e| {
             spinner.finish_and_clear();
             eprintln!("Failed to run cargo zigbuild, did you install it?: {e}");
             let _status = std::process::Command::new("cargo")
-                .args(["binstall", "cargo-zigbuild"]).status().unwrap_or_else(|e| {
-                eprintln!("Failed to run cargo binstall, did you install it?: {e}");
-                std::process::Command::new("cargo")
-                .args(["install", "cargo-zigbuild"]).status().unwrap_or_else(|_e| std::process::exit(1))
-            });
+                .args(["binstall", "cargo-zigbuild"])
+                .status()
+                .unwrap_or_else(|e| {
+                    eprintln!("Failed to run cargo binstall, did you install it?: {e}");
+                    std::process::Command::new("cargo")
+                        .args(["install", "cargo-zigbuild"])
+                        .status()
+                        .unwrap_or_else(|_e| std::process::exit(1))
+                });
             exit(1);
         });
 
@@ -223,6 +232,15 @@ pub fn build_project(package_root: &PathBuf) -> Result<(), io::Error> {
     Ok(())
 }
 
+pub fn default_artifact_path(target_directory: &StdPath, package_name: &str) -> PathBuf {
+    let rust_compiled_name = package_name.replace('-', "_");
+    let so_filename = format!("lib{rust_compiled_name}.so");
+    target_directory
+        .join("x86_64-unknown-linux-gnu")
+        .join("release")
+        .join(so_filename)
+}
+
 // The function to handle the run command
 pub async fn handle_run(port: u16) -> io::Result<()> {
     // Get project information
@@ -235,38 +253,25 @@ pub async fn handle_run(port: u16) -> io::Result<()> {
     // Build the project first
     build_project(&package_root)?;
 
-    // Get the full WASM file path - use same logic as in deploy
-    let rust_compiled_name = package_name.replace('-', "_");
-    let wasm_filename = format!("{rust_compiled_name}.wasm");
-    let wasm_path = target_directory
-        .join("wasm32-wasip2")
-        .join("release")
-        .join(wasm_filename);
+    // Get the full shared-library path - use same logic as in deploy
+    let artifact_path = default_artifact_path(&target_directory, &package_name);
 
-    // Ensure the WASM file exists
-    if !wasm_path.exists() {
+    // Ensure the shared library exists
+    if !artifact_path.exists() {
         eprintln!(
-            "Error: Could not find compiled WASM at: {}",
-            wasm_path.display()
+            "Error: Could not find compiled shared library at: {}",
+            artifact_path.display()
         );
         eprintln!("Build seems to have failed or produced output in a different location.");
         exit(1);
     }
 
-    println!("Starting local server on port {port}...");
-    let status = std::process::Command::new("wasmtime")
-        .args(["serve", &wasm_path.to_string_lossy()])
-        .current_dir(&package_root)
-        .status()
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to run wasmtime serve: {e}");
-            exit(1);
-        });
-
-    if !status.success() {
-        eprintln!("wasmtime serve exited with an error");
-        exit(1);
-    }
+    println!("Compiled shared library: {}", artifact_path.display());
+    eprintln!("Local run is currently unsupported for native .so functions.");
+    eprintln!(
+        "Deploy with 'cargo faasta deploy --artifact-path <path>' or run a Faasta server locally."
+    );
+    let _ = (port, package_root);
 
     Ok(())
 }

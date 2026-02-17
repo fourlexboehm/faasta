@@ -120,39 +120,33 @@ async fn main() {
                 }
             };
 
-            // Path to the WASM file
-            // Note: Rust compiler output converts hyphens to underscores, so we need to
-            // handle this conversion to find the compiled WASM file
-            // This is a client-side only conversion that's needed to locate the compiled artifact
-            let wasm_path = if let Some(explicit_path) = &args.wasm_path {
-                // User provided an explicit WASM path
+            // Path to the shared library artifact
+            // Note: Rust compiler output converts hyphens to underscores in artifact names.
+            let artifact_path = if let Some(explicit_path) = &args.artifact_path {
+                // User provided an explicit artifact path
                 PathBuf::from(explicit_path)
             } else {
                 // Auto-detect based on package name
-                let rust_compiled_name = package_name.replace('-', "_");
-                let wasm_filename = format!("{rust_compiled_name}.wasm");
-
-                // Path to the compiled WASM file (uses Rust's converted name)
-                target_directory
-                    .join("wasm32-wasip2")
-                    .join("release")
-                    .join(wasm_filename)
+                run::default_artifact_path(&target_directory, &package_name)
             };
 
-            // For explicit WASM paths, we'll use the filename without extension as the function name
+            // For explicit artifact paths, we'll use the filename without extension as the function name
             // unless the user specified a function name
-            let function_name = if args.wasm_path.is_some() && args.function_name.is_some() {
-                // User provided both WASM path and function name - use the explicit function name
+            let function_name = if args.artifact_path.is_some() && args.function_name.is_some() {
+                // User provided both artifact path and function name - use the explicit function name
                 args.function_name.clone().unwrap()
-            } else if args.wasm_path.is_some() {
-                // User provided WASM path but no function name - derive from filename
-                wasm_path
+            } else if args.artifact_path.is_some() {
+                // User provided artifact path but no function name - derive from filename
+                artifact_path
                     .file_stem()
                     .and_then(|s| s.to_str())
+                    .map(|s| s.trim_start_matches("lib").to_owned())
                     .map(|s| s.to_owned())
                     .unwrap_or_else(|| {
                         spinner.finish_and_clear();
-                        eprintln!("Error: Could not determine function name from WASM filename");
+                        eprintln!(
+                            "Error: Could not determine function name from artifact filename"
+                        );
                         exit(1);
                     })
             } else {
@@ -162,38 +156,40 @@ async fn main() {
 
             spinner.set_message(format!("Uploading function '{function_name}' to server..."));
 
-            if !wasm_path.exists() {
+            if !artifact_path.exists() {
                 spinner.finish_and_clear();
-                if args.wasm_path.is_some() {
+                if args.artifact_path.is_some() {
                     eprintln!(
-                        "Error: Could not find WASM file at: {}",
-                        wasm_path.display()
+                        "Error: Could not find shared library artifact at: {}",
+                        artifact_path.display()
                     );
                 } else {
                     eprintln!(
-                        "Error: Could not find compiled WASM at: {}",
-                        wasm_path.display()
+                        "Error: Could not find compiled shared library at: {}",
+                        artifact_path.display()
                     );
                     eprintln!("Options:");
-                    eprintln!("  1. Run 'cargo faasta build' first with wasm32-wasip2 target");
-                    eprintln!("  2. Specify an explicit WASM file path with --wasm-path");
+                    eprintln!(
+                        "  1. Run 'cargo faasta build' first with x86_64-unknown-linux-gnu target"
+                    );
+                    eprintln!("  2. Specify an explicit artifact path with --artifact-path");
                     eprintln!();
                     eprintln!(
-                        "If your WASM file is in a non-standard location or has a different name, use:"
+                        "If your artifact file is in a non-standard location or has a different name, use:"
                     );
-                    eprintln!("  cargo faasta deploy --wasm-path PATH/TO/YOUR/FILE.wasm");
+                    eprintln!("  cargo faasta deploy --artifact-path PATH/TO/YOUR/FILE.so");
                 }
                 exit(1);
             }
 
-            // Read the WASM file
-            let wasm_data = match std::fs::read(&wasm_path) {
+            // Read the shared library artifact
+            let artifact_data = match std::fs::read(&artifact_path) {
                 Ok(data) => {
-                    // Check WASM file size client-side as well (30MB max)
+                    // Check artifact size client-side as well (30MB max)
                     if data.len() > faasta_interface::MAX_WASM_SIZE {
                         spinner.finish_and_clear();
                         eprintln!(
-                            "Error: WASM file too large ({}MB). Maximum allowed size is 30MB.",
+                            "Error: Artifact file too large ({}MB). Maximum allowed size is 30MB.",
                             data.len() / 1024 / 1024
                         );
                         exit(1);
@@ -202,7 +198,7 @@ async fn main() {
                 }
                 Err(e) => {
                     spinner.finish_and_clear();
-                    eprintln!("Failed to read WASM file: {e}");
+                    eprintln!("Failed to read artifact file: {e}");
                     exit(1);
                 }
             };
@@ -232,7 +228,7 @@ async fn main() {
             // Publish the function
             let auth_token = format!("{github_username}:{github_token}");
             match client
-                .publish(wasm_data, function_name.clone(), auth_token)
+                .publish(artifact_data, function_name.clone(), auth_token)
                 .await
             {
                 Ok(Ok(message)) => {
@@ -338,82 +334,78 @@ async fn main() {
                     }
                 };
 
-                // Path to the WASM file
-                // Note: Rust compiler output converts hyphens to underscores, so we need to
-                // handle this conversion to find the compiled WASM file
-                let wasm_path = if let Some(explicit_path) = &build_args.wasm_path {
-                    // User provided an explicit WASM path
+                // Path to the shared library artifact
+                // Note: Rust compiler output converts hyphens to underscores in artifact names.
+                let artifact_path = if let Some(explicit_path) = &build_args.artifact_path {
+                    // User provided an explicit artifact path
                     PathBuf::from(explicit_path)
                 } else {
                     // Auto-detect based on package name
-                    let rust_compiled_name = package_name.replace('-', "_");
-                    let wasm_filename = format!("{rust_compiled_name}.wasm");
-
-                    // Path to the compiled WASM file (uses Rust's converted name)
-                    target_directory
-                        .join("wasm32-wasip2")
-                        .join("release")
-                        .join(wasm_filename)
+                    run::default_artifact_path(&target_directory, &package_name)
                 };
 
-                // For explicit WASM paths, we'll use the filename without extension as the function name
+                // For explicit artifact paths, we'll use the filename without extension as the function name
                 // unless the user specified a function name
-                let function_name =
-                    if build_args.wasm_path.is_some() && build_args.function_name.is_some() {
-                        // User provided both WASM path and function name - use the explicit function name
-                        build_args.function_name.clone().unwrap()
-                    } else if build_args.wasm_path.is_some() {
-                        // User provided WASM path but no function name - derive from filename
-                        wasm_path
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .map(|s| s.to_owned())
-                            .unwrap_or_else(|| {
-                                spinner.finish_and_clear();
-                                eprintln!(
-                                    "Error: Could not determine function name from WASM filename"
-                                );
-                                exit(1);
-                            })
-                    } else {
-                        // Standard flow - use the package name
-                        package_name.clone()
-                    };
+                let function_name = if build_args.artifact_path.is_some()
+                    && build_args.function_name.is_some()
+                {
+                    // User provided both artifact path and function name - use the explicit function name
+                    build_args.function_name.clone().unwrap()
+                } else if build_args.artifact_path.is_some() {
+                    // User provided artifact path but no function name - derive from filename
+                    artifact_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .map(|s| s.trim_start_matches("lib").to_owned())
+                        .map(|s| s.to_owned())
+                        .unwrap_or_else(|| {
+                            spinner.finish_and_clear();
+                            eprintln!(
+                                "Error: Could not determine function name from artifact filename"
+                            );
+                            exit(1);
+                        })
+                } else {
+                    // Standard flow - use the package name
+                    package_name.clone()
+                };
 
-                if !wasm_path.exists() {
+                if !artifact_path.exists() {
                     spinner.finish_and_clear();
-                    if build_args.wasm_path.is_some() {
+                    if build_args.artifact_path.is_some() {
                         eprintln!(
-                            "Error: Could not find WASM file at: {}",
-                            wasm_path.display()
+                            "Error: Could not find shared library artifact at: {}",
+                            artifact_path.display()
                         );
                     } else {
                         eprintln!(
-                            "Error: Could not find compiled WASM at: {}",
-                            wasm_path.display()
+                            "Error: Could not find compiled shared library at: {}",
+                            artifact_path.display()
                         );
                         eprintln!("Options:");
-                        eprintln!("  1. Run 'cargo faasta build' first with wasm32-wasip2 target");
-                        eprintln!("  2. Specify an explicit WASM file path with --wasm-path");
+                        eprintln!(
+                            "  1. Run 'cargo faasta build' first with x86_64-unknown-linux-gnu target"
+                        );
+                        eprintln!("  2. Specify an explicit artifact path with --artifact-path");
                         eprintln!();
                         eprintln!(
-                            "If your WASM file is in a non-standard location or has a different name, use:"
+                            "If your artifact file is in a non-standard location or has a different name, use:"
                         );
                         eprintln!(
-                            "  cargo faasta build --deploy --wasm-path PATH/TO/YOUR/FILE.wasm"
+                            "  cargo faasta build --deploy --artifact-path PATH/TO/YOUR/FILE.so"
                         );
                     }
                     exit(1);
                 }
 
-                // Read the WASM file
-                let wasm_data = match std::fs::read(&wasm_path) {
+                // Read the shared library artifact
+                let artifact_data = match std::fs::read(&artifact_path) {
                     Ok(data) => {
-                        // Check WASM file size client-side as well (30MB max)
+                        // Check artifact size client-side as well (30MB max)
                         if data.len() > faasta_interface::MAX_WASM_SIZE {
                             spinner.finish_and_clear();
                             eprintln!(
-                                "Error: WASM file too large ({}MB). Maximum allowed size is 30MB.",
+                                "Error: Artifact file too large ({}MB). Maximum allowed size is 30MB.",
                                 data.len() / 1024 / 1024
                             );
                             exit(1);
@@ -422,7 +414,7 @@ async fn main() {
                     }
                     Err(e) => {
                         spinner.finish_and_clear();
-                        eprintln!("Failed to read WASM file: {e}");
+                        eprintln!("Failed to read artifact file: {e}");
                         exit(1);
                     }
                 };
@@ -455,7 +447,7 @@ async fn main() {
                 // Publish the function
                 let auth_token = format!("{github_username}:{github_token}");
                 match client
-                    .publish(wasm_data, function_name.clone(), auth_token)
+                    .publish(artifact_data, function_name.clone(), auth_token)
                     .await
                 {
                     Ok(Ok(message)) => {
@@ -783,9 +775,9 @@ struct DeployArgs {
     #[arg(long)]
     skip_auth: bool,
 
-    /// Explicit path to WASM file (overrides automatic detection)
+    /// Explicit path to compiled shared library artifact (overrides automatic detection)
     #[arg(long)]
-    wasm_path: Option<String>,
+    artifact_path: Option<String>,
 
     /// Function name to use (if different from package name)
     #[arg(long)]
@@ -802,9 +794,9 @@ struct BuildArgs {
     #[arg(short, long)]
     deploy: bool,
 
-    /// Explicit path to WASM file (overrides automatic detection)
+    /// Explicit path to compiled shared library artifact (overrides automatic detection)
     #[arg(long)]
-    wasm_path: Option<String>,
+    artifact_path: Option<String>,
 
     /// Function name to use (if different from package name)
     #[arg(long)]
