@@ -346,14 +346,14 @@ async fn main() {
 
                 // For explicit artifact paths, we'll use the filename without extension as the function name
                 // unless the user specified a function name
-                let function_name = if build_args.artifact_path.is_some()
-                    && build_args.function_name.is_some()
-                {
+                let function_name = match (
+                    build_args.artifact_path.is_some(),
+                    build_args.function_name.is_some(),
+                ) {
                     // User provided both artifact path and function name - use the explicit function name
-                    build_args.function_name.clone().unwrap()
-                } else if build_args.artifact_path.is_some() {
+                    (true, true) => build_args.function_name.clone().unwrap(),
                     // User provided artifact path but no function name - derive from filename
-                    artifact_path
+                    (true, false) => artifact_path
                         .file_stem()
                         .and_then(|s| s.to_str())
                         .map(|s| s.trim_start_matches("lib").to_owned())
@@ -364,10 +364,9 @@ async fn main() {
                                 "Error: Could not determine function name from artifact filename"
                             );
                             exit(1);
-                        })
-                } else {
+                        }),
                     // Standard flow - use the package name
-                    package_name.clone()
+                    (false, _) => package_name.clone(),
                 };
 
                 if !artifact_path.exists() {
