@@ -12,9 +12,13 @@ target/*
 user_data/*
 server/user_data*
 functions/function
-server-wasi/certs/cert.pem
-server-wasi/certs/key.pem
-server-wasi/data/*
-server-wasi/functions
+server/certs/cert.pem
+server/certs/key.pem
+server/data/*
+server/functions
 
 **/.claude/settings.local.json
+.idea
+.idea
+.idea/rust-faas-serverless.iml
+.idea

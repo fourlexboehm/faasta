@@ -14,12 +14,10 @@ fn last_path_segment(ty: &Type) -> Option<String> {
 }
 
 fn is_faasta_response(ty: &Type) -> bool {
-    if let Type::Path(TypePath { path, .. }) = ty {
-        if let Some(last) = path.segments.last() {
-            if last.ident == "FaastaResponse" {
-                return true;
-            }
-        }
+    if let Type::Path(TypePath { path, .. }) = ty
+        && let Some(last) = path.segments.last()
+    {
+        return last.ident == "FaastaResponse";
     }
     false
 }

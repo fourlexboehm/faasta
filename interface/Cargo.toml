@@ -1,7 +1,7 @@
 [package]
 name = "faasta-interface"
 version = "0.2.0"
-edition = "2021"
+edition = "2024"
 description = "bitrpc types for the faasta serverless platform"
 license = "MIT"
 

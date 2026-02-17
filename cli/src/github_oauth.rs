@@ -69,11 +69,11 @@ struct GitHubUser {
 pub async fn github_oauth_flow() -> Result<(String, String)> {
     // Check if we're in test mode
     let (is_test_mode, test_username, test_token) = get_test_data();
-    if is_test_mode {
-        if let (Some(username), Some(token)) = (test_username, test_token) {
-            println!("Using test credentials");
-            return Ok((username, format!("Bearer {token}")));
-        }
+    if is_test_mode
+        && let (Some(username), Some(token)) = (test_username, test_token)
+    {
+        println!("Using test credentials");
+        return Ok((username, format!("Bearer {token}")));
     }
 
     // Set up the OAuth2 client
