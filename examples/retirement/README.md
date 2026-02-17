@@ -1,21 +1,32 @@
+# Retirement Planner Example
 
-This directory contains examples demonstrating the use of the [waki](https://crates.io/crates/waki) library for both HTTP client and server applications.
+This example renders an HTML retirement projection page from query parameters.
 
-
-The server example demonstrates a WebAssembly-based HTTP server using the waki library. 
-
-
-To build the server example:
+## Build
 
 ```bash
-cargo faasta build 
+cargo faasta build
 ```
 
-The resulting `.wasm` file will be in `target/wasm32-wasi/release/http_server.wasm`.
+The default artifact path is:
 
-- Path: `/external_api`
-- Method: GET
-- Query Parameters: `endpoint` (optional)
-- Description: Makes a request to an external API (httpbin.org) and returns the response.
-- Example: `GET /external_api?endpoint=ip` → Returns your IP address from httpbin.org
-- Example: `GET /external_api?endpoint=user-agent` → Returns your user agent from httpbin.org
+`target/x86_64-unknown-linux-gnu/release/libretirement.so`
+
+## Deploy
+
+```bash
+cargo faasta deploy
+```
+
+## Behavior
+
+Pass query parameters to tune the projection:
+
+- `years` (default `25`)
+- `savings` (default `50000`)
+- `contribution` (default `12000`)
+- `return` (default `0.06`)
+
+Example:
+
+`GET /?years=30&return=0.07&contribution=15000`

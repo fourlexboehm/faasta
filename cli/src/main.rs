@@ -10,7 +10,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::exit;
 
-const DEFAULT_INVOKE_URL: &str = "https://faasta.xyz/";
+const DEFAULT_INVOKE_URL: &str = "https://faasta.lol/";
 const MAX_PROJECTS_PER_USER: usize = 10;
 const CONFIG_DIR: &str = ".faasta";
 const CONFIG_FILE: &str = "config.json";
@@ -783,8 +783,8 @@ struct DeployArgs {
     #[arg(long)]
     function_name: Option<String>,
 
-    /// Server address to deploy to (e.g., "faasta.xyz:4433")
-    #[arg(long, default_value = "faasta.xyz:4433")]
+    /// Server address to deploy to (e.g., "faasta.lol:4433")
+    #[arg(long, default_value = "faasta.lol:4433")]
     server: String,
 }
 
@@ -802,8 +802,8 @@ struct BuildArgs {
     #[arg(long)]
     function_name: Option<String>,
 
-    /// Server address to deploy to (e.g., "faasta.xyz:4433")
-    #[arg(long, default_value = "faasta.xyz:4433")]
+    /// Server address to deploy to (e.g., "faasta.lol:4433")
+    #[arg(long, default_value = "faasta.lol:4433")]
     server: String,
 }
 
@@ -827,15 +827,15 @@ struct InvokeArgs {
 struct UnpublishArgs {
     /// Name of the function to unpublish
     name: String,
-    /// Server address (e.g., "faasta.xyz:4433")
-    #[arg(long, default_value = "faasta.xyz:4433")]
+    /// Server address (e.g., "faasta.lol:4433")
+    #[arg(long, default_value = "faasta.lol:4433")]
     server: String,
 }
 
 #[derive(Args, Debug)]
 struct ServerArgs {
-    /// Server address (e.g., "faasta.xyz:4433")
-    #[arg(long, default_value = "faasta.xyz:4433")]
+    /// Server address (e.g., "faasta.lol:4433")
+    #[arg(long, default_value = "faasta.lol:4433")]
     server: String,
 }
 

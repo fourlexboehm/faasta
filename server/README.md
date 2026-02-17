@@ -1,15 +1,16 @@
-# Faasta Server (WASI)
+# Faasta Server (KVM Runtime)
 
-This directory contains the server component of Faasta, a high-performance Function-as-a-Service platform built on WebAssembly and WASI.
+This directory contains the server component of Faasta, a high-performance Function-as-a-Service platform that executes native Linux shared libraries through `kvmserver`.
 
 ## Overview
 
 The Faasta server is responsible for:
-- Hosting and executing WebAssembly functions
+- Hosting and executing native `.so` function artifacts
 - Managing TLS certificates
 - Handling HTTP and HTTPS traffic
 - Providing an RPC interface for function deployment
 - Authentication via GitHub OAuth
+- Running functions via `kvmserver` for per-request isolation
 
 ## Self-Hosting on Ubuntu
 
@@ -106,14 +107,14 @@ Environment=PORKBUN_SECRET_API_KEY=your_secret_api_key_here
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--base-domain` | Base domain for function subdomains | faasta.xyz |
+| `--base-domain` | Base domain for function subdomains | faasta.lol |
 | `--listen-addr` | Address to listen on for HTTPS | 0.0.0.0:443 |
 | `--http-listen-addr` | Address to listen on for HTTP redirects | 0.0.0.0:80 |
 | `--tls-cert-path` | Path to TLS certificate file | ./certs/cert.pem |
 | `--tls-key-path` | Path to TLS private key file | ./certs/key.pem |
 | `--certs-dir` | Directory for certificate storage | ./certs |
 | `--auto-cert` | Auto-generate TLS certificate | true |
-| `--letsencrypt-email` | Email for Let's Encrypt | admin@faasta.xyz |
+| `--letsencrypt-email` | Email for Let's Encrypt | admin@faasta.lol |
 | `--db-path` | Path to the database directory | ./data/db |
 | `--functions-path` | Path to the functions directory | ./functions |
 
@@ -167,7 +168,7 @@ The Faasta server runs with several security measures:
 
 - Runs as a dedicated `faasta` user with limited privileges
 - Uses systemd security features like `ProtectSystem=full` and `PrivateTmp=true`
-- Functions are isolated through WebAssembly's sandboxed execution model
+- Functions are isolated by `kvmserver` and TinyKVM per-request VM reset
 
 For production deployments, consider:
 

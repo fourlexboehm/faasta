@@ -13,7 +13,7 @@ bytes = "1"
 cap-async-std = { version = "3.4.2", features = ["tokio1"] }
 chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
-compio = { version = "0.16.0", features = ["macros", "rustls", "time"] }
+compio = { version = "0.16.0", features = ["macros", "rustls", "time", "polling"] }
 compio-quic = { version = "0.5.0", features = ["h3"] }
 cyper = { version = "0.5.0", features = ["json", "rustls"] }
 cyper-core = "0.5.0"

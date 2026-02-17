@@ -8,14 +8,15 @@ This directory contains example applications demonstrating the use of Faasta wit
 
 The [waki](./waki) directory contains examples demonstrating the use of the [waki](https://crates.io/crates/waki) library for both HTTP client and server applications. It includes:
 
-- A WebAssembly-based HTTP server example
+- A Faasta macro-based HTTP proxy example
+
 ### Faasta Website
 
 The [faasta-website](./faasta-website) directory contains an example website built with Faasta.
 
-### Spin
+### Retirement Planner
 
-The [spin](./spin) directory contains an example application using the Spin framework with Faasta.
+The [retirement](./retirement) directory contains an HTML app example that renders projections from query parameters.
 
 ## Running the Examples
 

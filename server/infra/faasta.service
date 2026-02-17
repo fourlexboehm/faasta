@@ -8,7 +8,7 @@ Type=simple
 User=faasta
 Group=faasta
 WorkingDirectory=/opt/faasta
-ExecStart=/bin/sh -lc 'exec /opt/faasta/faasta-server --base-domain faasta.xyz'
+ExecStart=/bin/sh -lc 'exec /opt/faasta/kvmserver run -- /opt/faasta/faasta-server --base-domain faasta.lol'
 Restart=on-failure
 RestartSec=5
 Environment=DATA_DIR=/var/lib/faasta

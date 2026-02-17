@@ -61,7 +61,7 @@ fn serve_home_page() -> Markup {
                             div.stat-label { "Memory Overhead" }
                         }
                         div.stat {
-                            div.stat-value { "WASI P2" }
+                            div.stat-value { "KVM" }
                             div.stat-label { "Standard" }
                         }
                     }
@@ -74,13 +74,13 @@ fn serve_home_page() -> Markup {
                     div.feature-grid {
                         div.feature {
                             div.feature-icon { "⚡" }
-                            h3 { "WebAssembly Powered" }
-                            p { "Run your code as WebAssembly modules using the WASI P2 standard for maximum performance." }
+                            h3 { "Native Runtime" }
+                            p { "Build Rust handlers to native Linux shared libraries and execute them with minimal overhead." }
                         }
                         div.feature {
                             div.feature-icon { "🔒" }
                             h3 { "Secure Isolation" }
-                            p { "Functions run in WebAssembly's sandboxed execution model for strong security guarantees." }
+                            p { "Functions run inside kvmserver/TinyKVM request sandboxes for strong isolation guarantees." }
                         }
                         div.feature {
                             div.feature-icon { "🚀" }
@@ -99,8 +99,8 @@ fn serve_home_page() -> Markup {
                         }
                         div.feature {
                             div.feature-icon { "🌐" }
-                            h3 { "Standards Compliant" }
-                            p { "Based on WASI Preview 2 and wasi-http, making your functions portable across platforms." }
+                            h3 { "KVM Isolated" }
+                            p { "Per-request isolation is provided by kvmserver and TinyKVM snapshot resets." }
                         }
                     }
                 }
@@ -128,7 +128,7 @@ fn serve_home_page() -> Markup {
                         div.step {
                             div.step-number { "4" }
                             h3 { "Profit!" }
-                            p { "Access your function at " code { "your-function.faasta.xyz" } }
+                            p { "Access your function at " code { "your-function.faasta.lol" } }
                         }
                     }
                 }
@@ -180,7 +180,7 @@ async fn handler(request: FaastaRequest, dir: Dir) -> FaastaResponse {
                             h3 { "Resources" }
                             ul {
                                 li { a href="https://github.com/fourlexboehm/faasta" { "GitHub Repository" } }
-                                li { a href="https://faasta.xyz" { "Hosted Instance" } }
+                                li { a href="https://faasta.lol" { "Hosted Instance" } }
                                 li { a href="https://docs.rs/faasta-types" { "Type Documentation" } }
                             }
                         }
@@ -219,7 +219,7 @@ fn serve_getting_started_page() -> Markup {
                         }
                         div.step {
                             h2 { "5. Invoke" }
-                            pre { "curl https://your-function.faasta.xyz" }
+                            pre { "curl https://your-function.faasta.lol" }
                         }
                     }
 

@@ -9,9 +9,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
+use compio::driver::{DriverType, ProactorBuilder};
+use compio::runtime::RuntimeBuilder;
 use faasta_interface::FunctionError;
 use serde::Serialize;
 use serde_json::json;
+use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -47,7 +50,7 @@ struct Args {
     http_listen_addr: SocketAddr,
 
     /// Base domain for function subdomains
-    #[arg(long, env = "BASE_DOMAIN", default_value = "faasta.xyz")]
+    #[arg(long, env = "BASE_DOMAIN", default_value = "faasta.lol")]
     base_domain: String,
 
     /// Path to the TLS certificate file (PEM format)
@@ -74,9 +77,20 @@ struct Args {
     #[arg(long, env = "RPC_LISTEN_ADDR", default_value = "0.0.0.0:2443")]
     rpc_listen_addr: String,
 
+    /// Driver backend for the QUIC RPC runtime: polling (fork-safe), io-uring, or auto.
+    #[arg(long, env = "RPC_DRIVER", default_value = "polling")]
+    rpc_driver: RpcDriver,
+
     /// Auto-generate TLS certificate using Porkbun
     #[arg(long, env = "AUTO_CERT", default_value = "false")]
     auto_cert: bool,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum RpcDriver {
+    Auto,
+    Polling,
+    IoUring,
 }
 
 #[derive(Clone)]
@@ -163,7 +177,8 @@ async fn main() -> Result<()> {
     let rpc_cert = args.tls_cert_path.clone();
     let rpc_key = args.tls_key_path.clone();
     let rpc_addr = args.rpc_listen_addr.clone();
-    tokio::task::spawn_blocking(move || match compio::runtime::Runtime::new() {
+    let rpc_driver = args.rpc_driver;
+    tokio::task::spawn_blocking(move || match build_rpc_runtime(rpc_driver) {
         Ok(runtime) => {
             if let Err(err) = runtime.block_on(quic::run_rpc_server(rpc_cert, rpc_key, rpc_addr)) {
                 error!("rpc server exited with error: {err}");
@@ -177,6 +192,23 @@ async fn main() -> Result<()> {
         .serve(router.into_make_service())
         .await
         .context("https server error")
+}
+
+fn build_rpc_runtime(driver: RpcDriver) -> io::Result<compio::runtime::Runtime> {
+    let mut proactor_builder = ProactorBuilder::new();
+    match driver {
+        RpcDriver::Auto => {}
+        RpcDriver::Polling => {
+            proactor_builder.driver_type(DriverType::Poll);
+        }
+        RpcDriver::IoUring => {
+            proactor_builder.driver_type(DriverType::IoUring);
+        }
+    }
+
+    let mut runtime_builder = RuntimeBuilder::new();
+    runtime_builder.with_proactor(proactor_builder);
+    runtime_builder.build()
 }
 
 async fn run_http_redirect(addr: SocketAddr, target_domain: String) {

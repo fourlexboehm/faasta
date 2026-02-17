@@ -1,17 +1,16 @@
 # Faasta: a Faster FaaS Platform
 
-Faasta is a cutting-edge Function-as-a-Service (FaaS) platform designed for exceptional speed and efficiency. With **cold start times under 1ms** and a **memory overhead of less than 1KB**, Faasta delivers unparalleled performance through its modern WebAssembly architecture.
+Faasta is a cutting-edge Function-as-a-Service (FaaS) platform designed for exceptional speed and efficiency. With **cold start times under 1ms** and a **memory overhead of less than 1KB**, Faasta runs native Linux shared libraries under strong per-request isolation.
 
 ## Key Features
 
-- Runs your code as **WebAssembly modules** using the WASI P2 standard
-- Leverages **WASIHTTP** for high-performance HTTP request handling
-- Provides **secure isolation** between functions through WebAssembly's sandboxed execution model
+- Builds your Rust handlers into **native x86_64 Linux shared libraries** (`.so`)
+- Uses the `#[faasta]` macro and strongly typed request/response primitives
+- Provides **secure per-request isolation** with [kvmserver](./kvmserver/README.md)
 - Achieves **ultra-fast cold starts** without the overhead of traditional containerization
 - **Self-hostable** with simple setup - run your own Faasta instance anywhere
-- **Standards-compliant** with WASI P2 and WASIHTTP, making your functions portable
-- Powered by **Wasmtime** for efficient WebAssembly execution
-- Includes a **free hosted instance** at [faasta.xyz](https://faasta.xyz)
+- Powered by **KVM + TinyKVM** for fast reset and isolation
+- Includes a **free hosted instance** at [faasta.lol](https://faasta.lol)
 
 ---
 
@@ -29,7 +28,7 @@ cargo faasta init
 cargo faasta new my-function
 ```
 
-Build your function for WebAssembly:
+Build your function:
 ```bash
 cargo faasta build
 ```
@@ -44,23 +43,26 @@ Deploy your function:
 cargo faasta deploy
 ```
 
-Your function will be available at `https://your-function-name.faasta.xyz`
+Your function will be available at `https://your-function-name.faasta.lol`
 
-## WASI P2 and WASIHTTP
+## Runtime Model (KVM Server)
 
-Faasta implements the WebAssembly System Interface (WASI) Preview 2 specification and the WASIHTTP standard to enable:
+Faasta runs functions as native Linux code and isolates requests using `kvmserver`:
 
-- Standardized HTTP request and response handling
-- Component-based architecture for better modularity
-- Consistent interface for interacting with the host system
-- Portable functions that can run on any WASI P2 compatible runtime
+- The CLI builds a `.so` artifact (`x86_64-unknown-linux-gnu`)
+- The server launches functions through `kvmserver`
+- `kvmserver` uses TinyKVM snapshots for fast request isolation and reset
 
-Because Faasta uses these open standards, your functions are not locked to a specific platform and can be hosted anywhere that supports these standards.
+For self-hosting, see:
+- [KVM server docs](./kvmserver/README.md)
+- [Faasta server setup](./server/README.md)
 
 ## Self-Hosting
 
-Faasta is fully self-hostable. You can run your own instance of the Faasta server to host your functions on your own infrastructure.
+Faasta is fully self-hostable. The provided systemd setup runs:
+
+- `/opt/faasta/faasta-server` (control plane / routing)
+- `/opt/faasta/kvmserver` (request execution runtime)
 
 ⚠️ Experimental Status
-Faasta is currently experimental. There will be breaking changes that will interupt service on the faasta.xyz instance.
-
+Faasta is currently experimental. There will be breaking changes that will interupt service on the faasta.lol instance.

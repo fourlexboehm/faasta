@@ -4,6 +4,9 @@ set -e
 echo "Setting up Faasta auto-updater on Ubuntu..."
 echo "Using repository: fourlexboehm/faasta"
 
+KVM_URL="https://github.com/libriscv/kvmserver/releases/download/v0.2.0/kvmserver.gz"
+KVM_DEST="/opt/faasta/kvmserver"
+
 # Create the faasta user
 if ! id -u faasta &>/dev/null; then
   echo "Creating faasta user..."
@@ -23,6 +26,26 @@ chown -R faasta:faasta /opt/faasta /var/lib/faasta /var/log/faasta*.log
 echo "Installing scripts and service files..."
 cp update-faasta.sh /opt/faasta/
 chmod +x /opt/faasta/update-faasta.sh
+
+# Download kvmserver
+echo "Downloading kvmserver binary..."
+TMP_DIR=$(mktemp -d)
+if ! curl -L "$KVM_URL" -o "$TMP_DIR/kvmserver.gz"; then
+  echo "Failed to download kvmserver from $KVM_URL"
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
+
+if ! gunzip -f "$TMP_DIR/kvmserver.gz"; then
+  echo "Failed to extract kvmserver"
+  rm -rf "$TMP_DIR"
+  exit 1
+fi
+
+mv "$TMP_DIR/kvmserver" "$KVM_DEST"
+chmod +x "$KVM_DEST"
+chown faasta:faasta "$KVM_DEST"
+rm -rf "$TMP_DIR"
 
 # Install service files
 cp faasta.service faasta-updater.service faasta-updater.timer /etc/systemd/system/

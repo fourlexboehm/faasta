@@ -2,7 +2,7 @@
 name = "website"
 version = "0.1.0"
 edition = "2024"
-description = "Official website for the Faasta project using WASI-HTTP"
+description = "Official website for the Faasta project using native Faasta handlers"
 
 [lib]
 crate-type = ["cdylib"]

@@ -185,7 +185,7 @@ impl FunctionServiceImpl {
             name: name.clone(),
             owner: username,
             published_at: now,
-            usage: format!("https://{name}.faasta.xyz or https://faasta.xyz/{name}"),
+            usage: format!("https://{name}.faasta.lol or https://faasta.lol/{name}"),
         };
 
         // Serialize metadata with bincode
