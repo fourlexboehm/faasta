@@ -5,13 +5,14 @@ use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-const USER_DB_TREE: &str = "user_data";
+use crate::db::Database;
+
 const MAX_PROJECTS_PER_USER: usize = 10;
 const USER_AGENT: &str = "faasta-server";
 
 pub struct GitHubAuth {
     user_projects: DashMap<String, UserData>,
-    db: sled::Db,
+    db: std::sync::Arc<Database>,
 }
 #[derive(Serialize, Deserialize, Clone, Debug, Encode, Decode)]
 pub struct UserData {
@@ -20,22 +21,14 @@ pub struct UserData {
 }
 
 impl GitHubAuth {
-    pub async fn new(db: sled::Db) -> Result<Self> {
+    pub async fn new(db: std::sync::Arc<Database>) -> Result<Self> {
         // Load existing user data
         let user_projects = DashMap::new();
-
-        // Create or get the user data tree
-        let user_tree = db.open_tree(USER_DB_TREE)?;
-
-        // Iterate through all items in the tree
-        for item in user_tree.iter().flatten() {
-            if let Ok(username) = std::str::from_utf8(&item.0) {
-                // Try to decode using bincode
-                if let Ok((user_data, _)) =
-                    bincode::decode_from_slice::<UserData, _>(&item.1, bincode::config::standard())
-                {
-                    user_projects.insert(username.to_string(), user_data);
-                }
+        for (username, encoded) in db.iter_users()? {
+            if let Ok((user_data, _)) =
+                bincode::decode_from_slice::<UserData, _>(&encoded, bincode::config::standard())
+            {
+                user_projects.insert(username, user_data);
             }
         }
 
@@ -158,9 +151,8 @@ impl GitHubAuth {
             .insert(username.to_string(), user_data.clone());
 
         // Save to database
-        let user_tree = self.db.open_tree(USER_DB_TREE)?;
         let encoded = bincode::encode_to_vec(&user_data, bincode::config::standard())?;
-        user_tree.insert(username.as_bytes(), encoded)?;
+        self.db.put_user(username, &encoded)?;
 
         Ok(())
     }
@@ -173,10 +165,9 @@ impl GitHubAuth {
             user_data.projects.retain(|p| p != project_name);
 
             // Save to database
-            let user_tree = self.db.open_tree(USER_DB_TREE)?;
             let user_data_clone = user_data.clone();
             let encoded = bincode::encode_to_vec(&user_data_clone, bincode::config::standard())?;
-            user_tree.insert(username.as_bytes(), encoded)?;
+            self.db.put_user(username, &encoded)?;
         }
 
         Ok(())

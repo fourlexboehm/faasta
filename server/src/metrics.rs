@@ -2,19 +2,21 @@ use dashmap::DashMap;
 use faasta_interface::{FunctionMetricsResponse, Metrics};
 use once_cell::sync::Lazy;
 use std::path::Path;
-use std::str;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time;
 use tracing::{debug, error, info};
 
+use crate::db::Database;
+
 // Global metrics storage using DashMap for lock-free concurrent access
 pub static FUNCTION_METRICS: Lazy<DashMap<String, FunctionMetric>> = Lazy::new(DashMap::new);
 
-// Sled database for persistent storage
-pub static METRICS_DB: Lazy<sled::Db> = Lazy::new(|| {
+// SQLite database for persistent storage
+pub static METRICS_DB: Lazy<Arc<Database>> = Lazy::new(|| {
     let db_path = std::env::var("METRICS_DB_PATH").unwrap_or_else(|_| "./data/metrics".to_string());
-    sled::open(db_path).expect("Failed to open metrics database")
+    Arc::new(Database::open(std::path::Path::new(&db_path)).expect("Failed to open metrics database"))
 });
 
 #[derive(Debug)]
@@ -45,22 +47,15 @@ impl FunctionMetric {
             .unwrap_or(Duration::from_secs(0))
             .as_millis() as u64;
 
-        // Try to load from sled if it exists
-        let metric = if let Ok(Some(data)) = METRICS_DB.get(function_name.as_bytes()) {
-            if let Ok(((total_time, call_count, last_called), _)) =
-                bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(
-                    &data,
-                    bincode::config::standard(),
-                )
-            {
-                Self {
-                    function_name,
-                    total_time: AtomicU64::new(total_time),
-                    call_count: AtomicU64::new(call_count),
-                    last_called: AtomicU64::new(last_called),
-                }
-            } else {
-                Self::default(function_name, now)
+        // Try to load persisted metrics if they exist
+        let metric = if let Ok(Some((total_time, call_count, last_called))) =
+            METRICS_DB.get_metric(&function_name)
+        {
+            Self {
+                function_name,
+                total_time: AtomicU64::new(total_time),
+                call_count: AtomicU64::new(call_count),
+                last_called: AtomicU64::new(last_called),
             }
         } else {
             Self::default(function_name, now)
@@ -111,15 +106,8 @@ impl FunctionMetric {
     // Method to flush this individual function's metrics to the database
     pub fn flush_to_db(&self) {
         // Load existing DB values
-        let existing = METRICS_DB
-            .get(self.function_name.as_bytes())
-            .unwrap_or(None);
-        let (db_total, db_calls, db_last) = if let Some(db_bytes) = existing {
-            if let Ok(((t, c, l), _)) = bincode::decode_from_slice::<
-                (u64, u64, u64),
-                bincode::config::Configuration,
-            >(&db_bytes, bincode::config::standard())
-            {
+        let (db_total, db_calls, db_last) =
+            if let Ok(Some((t, c, l))) = METRICS_DB.get_metric(&self.function_name) {
                 info!(
                     "Found existing DB metrics for '{}': total={}ms, calls={}, last={}",
                     self.function_name, t, c, l
@@ -127,18 +115,11 @@ impl FunctionMetric {
                 (t, c, l)
             } else {
                 info!(
-                    "Failed to decode existing DB metrics for '{}', using zeros",
+                    "No existing DB metrics for '{}', using zeros",
                     self.function_name
                 );
                 (0, 0, 0)
-            }
-        } else {
-            info!(
-                "No existing DB metrics for '{}', using zeros",
-                self.function_name
-            );
-            (0, 0, 0)
-        };
+            };
 
         // Add current in-memory values
         let mem_total = self.total_time.load(Ordering::Relaxed);
@@ -161,22 +142,20 @@ impl FunctionMetric {
         );
 
         // Combine and persist
-        if let Ok(data) = bincode::encode_to_vec(
-            (combined_total, combined_calls, combined_last),
-            bincode::config::standard(),
+        match METRICS_DB.upsert_metric(
+            &self.function_name,
+            combined_total,
+            combined_calls,
+            combined_last,
         ) {
-            match METRICS_DB.insert(self.function_name.as_bytes(), data) {
-                Ok(_) => info!(
-                    "Successfully persisted metrics for '{}'",
-                    self.function_name
-                ),
-                Err(e) => error!(
-                    "Failed to persist metrics for '{}': {}",
-                    self.function_name, e
-                ),
-            }
-        } else {
-            error!("Failed to encode metrics for '{}'", self.function_name);
+            Ok(_) => info!(
+                "Successfully persisted metrics for '{}'",
+                self.function_name
+            ),
+            Err(e) => error!(
+                "Failed to persist metrics for '{}': {}",
+                self.function_name, e
+            ),
         }
     }
 }
@@ -200,84 +179,59 @@ pub fn get_metrics() -> Metrics {
     let mut total_calls = 0;
 
     // Log the number of entries in the metrics database
-    let db_entries_count = METRICS_DB.iter().count();
+    let metric_rows = METRICS_DB.iter_metrics().unwrap_or_default();
+    let db_entries_count = metric_rows.len();
     info!("Found {} entries in metrics database", db_entries_count);
 
-    for (key, value) in METRICS_DB.iter().flatten() {
-        if key.starts_with(b"user:") {
-            continue;
-        }
+    for (function_name, db_total_time, db_call_count, db_last_called) in metric_rows {
+        info!(
+            "DB metrics for '{}': total={}ms, calls={}, last={}",
+            function_name, db_total_time, db_call_count, db_last_called
+        );
 
-        let function_name = match str::from_utf8(&key) {
-            Ok(name) => name.to_string(),
-            Err(_) => {
-                debug!("Skipping invalid UTF-8 key in metrics database");
-                continue; // Skip invalid UTF-8 keys
-            }
-        };
+        // Load in-memory metrics
+        let (mem_total_time, mem_call_count, mem_last_called) = FUNCTION_METRICS
+            .get(&function_name)
+            .map(|m| {
+                let total = m.total_time.load(Ordering::Relaxed);
+                let calls = m.call_count.load(Ordering::Relaxed);
+                let last = m.last_called.load(Ordering::Relaxed);
 
-        // Decode the DB metrics data
-        if let Ok(((db_total_time, db_call_count, db_last_called), _)) =
-            bincode::decode_from_slice::<(u64, u64, u64), bincode::config::Configuration>(
-                &value,
-                bincode::config::standard(),
-            )
-        {
-            info!(
-                "DB metrics for '{}': total={}ms, calls={}, last={}",
-                function_name, db_total_time, db_call_count, db_last_called
-            );
+                info!(
+                    "In-memory metrics for '{}': total={}ms, calls={}, last={}",
+                    function_name, total, calls, last
+                );
 
-            // Load in-memory metrics
-            let (mem_total_time, mem_call_count, mem_last_called) = FUNCTION_METRICS
-                .get(&function_name)
-                .map(|m| {
-                    let total = m.total_time.load(Ordering::Relaxed);
-                    let calls = m.call_count.load(Ordering::Relaxed);
-                    let last = m.last_called.load(Ordering::Relaxed);
-
-                    info!(
-                        "In-memory metrics for '{}': total={}ms, calls={}, last={}",
-                        function_name, total, calls, last
-                    );
-
-                    (total, calls, last)
-                })
-                .unwrap_or_else(|| {
-                    info!("No in-memory metrics for '{}', using zeros", function_name);
-                    (0, 0, 0)
-                });
-
-            // Combine DB and in-memory metrics
-            let combined_total_time = db_total_time.saturating_add(mem_total_time);
-            let combined_call_count = db_call_count.saturating_add(mem_call_count);
-            let combined_last_called = std::cmp::max(db_last_called, mem_last_called);
-
-            info!(
-                "Combined metrics for '{}': total={}ms, calls={}, last={}",
-                function_name, combined_total_time, combined_call_count, combined_last_called
-            );
-
-            // Convert timestamp to ISO string
-            let last_called_time = UNIX_EPOCH + Duration::from_millis(combined_last_called);
-            let last_called_str =
-                chrono::DateTime::<chrono::Utc>::from(last_called_time).to_rfc3339();
-
-            function_metrics.push(FunctionMetricsResponse {
-                function_name: function_name.clone(),
-                total_time_millis: combined_total_time,
-                call_count: combined_call_count,
-                last_called: last_called_str,
+                (total, calls, last)
+            })
+            .unwrap_or_else(|| {
+                info!("No in-memory metrics for '{}', using zeros", function_name);
+                (0, 0, 0)
             });
 
-            total_time += combined_total_time;
-            total_calls += combined_call_count;
-        } else {
-            error!(
-                "Failed to decode metrics data for function '{}'",
-                function_name
-            );
-        }
+        // Combine DB and in-memory metrics
+        let combined_total_time = db_total_time.saturating_add(mem_total_time);
+        let combined_call_count = db_call_count.saturating_add(mem_call_count);
+        let combined_last_called = std::cmp::max(db_last_called, mem_last_called);
+
+        info!(
+            "Combined metrics for '{}': total={}ms, calls={}, last={}",
+            function_name, combined_total_time, combined_call_count, combined_last_called
+        );
+
+        // Convert timestamp to ISO string
+        let last_called_time = UNIX_EPOCH + Duration::from_millis(combined_last_called);
+        let last_called_str = chrono::DateTime::<chrono::Utc>::from(last_called_time).to_rfc3339();
+
+        function_metrics.push(FunctionMetricsResponse {
+            function_name: function_name.clone(),
+            total_time_millis: combined_total_time,
+            call_count: combined_call_count,
+            last_called: last_called_str,
+        });
+
+        total_time += combined_total_time;
+        total_calls += combined_call_count;
     }
 
     info!(
@@ -319,29 +273,14 @@ pub fn get_or_create_metric(function_name: &str) -> Option<FunctionMetric> {
             vacant.insert(metric.clone());
 
             // New function added - ensure it's recorded in Sled DB even if no calls happen
-            if !METRICS_DB
-                .contains_key(function_name.as_bytes())
-                .unwrap_or(false)
-            {
+            if !METRICS_DB.metric_exists(function_name).unwrap_or(false) {
                 // Get current time in milliseconds for initialization
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or(Duration::from_secs(0))
                     .as_millis() as u64;
 
-                // Initialize with zeros
-                let initial_data =
-                    match bincode::encode_to_vec((0u64, 0u64, now), bincode::config::standard()) {
-                        Ok(data) => data,
-                        Err(e) => {
-                            error!(
-                                "Failed to encode initial metrics for new function {}: {}",
-                                function_name, e
-                            );
-                            return None;
-                        }
-                    };
-                let _ = METRICS_DB.insert(function_name.as_bytes(), initial_data);
+                let _ = METRICS_DB.upsert_metric(function_name, 0, 0, now);
                 debug!("Added new function '{}' to metrics database", function_name);
             }
 

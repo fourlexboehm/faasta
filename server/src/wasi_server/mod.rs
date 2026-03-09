@@ -18,6 +18,7 @@ use once_cell::sync::OnceCell;
 use tokio::fs;
 use tracing::debug;
 
+use crate::db::Database;
 use crate::github_auth::GitHubAuth;
 use crate::kvm_guest;
 use crate::metrics::Timer;
@@ -53,7 +54,7 @@ impl LoadedFunction {
 }
 
 pub struct FaastaServer {
-    pub metadata_db: sled::Db,
+    pub metadata_db: Arc<Database>,
     pub base_domain: String,
     pub functions_dir: PathBuf,
     sandbox_root: PathBuf,
@@ -64,7 +65,7 @@ pub struct FaastaServer {
 
 impl FaastaServer {
     pub async fn new(
-        metadata_db: sled::Db,
+        metadata_db: Arc<Database>,
         base_domain: String,
         functions_dir: PathBuf,
     ) -> Result<Self> {

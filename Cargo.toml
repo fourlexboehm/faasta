@@ -1,6 +1,5 @@
 [workspace]
 resolver = "2"
-edition = '2024'
 members = [
     "cli",
     "interface",

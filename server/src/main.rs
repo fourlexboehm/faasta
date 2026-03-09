@@ -25,6 +25,7 @@ use tower_http::trace::TraceLayer;
 use tracing::{Level, error, info};
 
 mod cert_manager;
+mod db;
 mod github_auth;
 mod kvm_guest;
 mod metrics;
@@ -33,6 +34,7 @@ mod rpc_service;
 mod wasi_server;
 
 use cert_manager::CertManager;
+use db::Database;
 use metrics::{get_metrics, spawn_periodic_flush};
 use rpc_service::create_service;
 use wasi_server::{FaastaServer, SERVER, sanitize_function_name};
@@ -65,7 +67,7 @@ struct Args {
     #[arg(long, env = "CERTS_DIR", default_value = "./certs")]
     certs_dir: PathBuf,
 
-    /// Path to the SledDB database directory
+    /// Path to the SQLite metadata database directory or file
     #[arg(long, env = "DB_PATH", default_value = "./data/db")]
     db_path: PathBuf,
 
@@ -134,7 +136,7 @@ async fn main() -> Result<()> {
         cert_manager.spawn_periodic_renewal();
     }
 
-    let metadata_db = sled::open(&args.db_path).context("failed to open sled db")?;
+    let metadata_db = Arc::new(Database::open(&args.db_path).context("failed to open sqlite db")?);
 
     let server = Arc::new(
         FaastaServer::new(

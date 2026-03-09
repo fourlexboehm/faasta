@@ -5,21 +5,15 @@ use std::fs;
 use std::io::Write;
 use tracing::{debug, error, info};
 
-/// Sled tree name for function metadata
-const FUNCTIONS_DB_TREE: &str = "functions";
-
 /// Implementation of the FunctionService
 /// The FaastaServer struct is the one holding the pre_cache, but we need a way to
 /// clear cache entries when unpublishing functions.
 ///
 #[derive(Clone)]
-pub struct FunctionServiceImpl {
-    functions_tree: sled::Tree,
-}
+pub struct FunctionServiceImpl;
 
 impl FunctionServiceImpl {
     /// Create a new FunctionServiceImpl
-    /// Create a new FunctionServiceImpl, loading persisted metadata from sled
     pub fn new() -> anyhow::Result<Self> {
         // Ensure functions directory exists
         let server = SERVER.get().unwrap();
@@ -27,10 +21,7 @@ impl FunctionServiceImpl {
             fs::create_dir_all(&server.functions_dir)?;
         }
 
-        // Open or create sled tree for function metadata
-        let functions_tree = server.metadata_db.open_tree(FUNCTIONS_DB_TREE)?;
-
-        Ok(Self { functions_tree })
+        Ok(Self)
     }
 }
 
@@ -81,7 +72,7 @@ impl FunctionServiceImpl {
 
         // Check if function already exists
         if artifact_path.exists() {
-            let entry_result = self.functions_tree.get(name.as_bytes()).map_err(|e| {
+            let entry_result = server.metadata_db.get_function(&name).map_err(|e| {
                 FunctionError::InternalError(format!("Failed to get function metadata: {e}"))
             })?;
 
@@ -193,12 +184,9 @@ impl FunctionServiceImpl {
             bincode::encode_to_vec(&function_info, bincode::config::standard()).map_err(|e| {
                 FunctionError::InternalError(format!("Failed to serialize function metadata: {e}"))
             })?;
-        // Persist metadata to sled
-        self.functions_tree
-            .insert(name.as_bytes(), meta)
-            .map_err(|e| {
-                FunctionError::InternalError(format!("Failed to persist function metadata: {e}"))
-            })?;
+        server.metadata_db.put_function(&name, &meta).map_err(|e| {
+            FunctionError::InternalError(format!("Failed to persist function metadata: {e}"))
+        })?;
 
         Ok(format!("Function '{name}' published successfully"))
     }
@@ -229,7 +217,7 @@ impl FunctionServiceImpl {
             // For each project owned by the user, get the function info
             for project_name in projects {
                 // Get function info from the functions tree
-                if let Ok(Some(value)) = self.functions_tree.get(project_name.as_bytes()) {
+                if let Ok(Some(value)) = server.metadata_db.get_function(&project_name) {
                     // Deserialize the function info
                     match bincode::decode_from_slice::<FunctionInfo, _>(
                         &value,
@@ -277,7 +265,7 @@ impl FunctionServiceImpl {
         info!("Authentication successful for user: {username}");
 
         // Check if function exists
-        let entry_result = self.functions_tree.get(name.as_bytes()).map_err(|e| {
+        let entry_result = server.metadata_db.get_function(&name).map_err(|e| {
             FunctionError::InternalError(format!("Failed to get function metadata: {e}"))
         })?;
 
@@ -318,8 +306,8 @@ impl FunctionServiceImpl {
                 }
             }
 
-            // Remove metadata from sled
-            match self.functions_tree.remove(name.as_bytes()) {
+            // Remove metadata from sqlite
+            match server.metadata_db.delete_function(&name) {
                 Ok(_) => debug!("Successfully removed metadata for function '{name}'"),
                 Err(e) => error!("Failed to remove function metadata for '{name}': {e}"),
                 // We don't return an error here because the function was already removed
@@ -363,7 +351,7 @@ impl FunctionServiceImpl {
             ));
         }
 
-        // Use the metrics module to get metrics from sled
+        // Use the metrics module to get persisted metrics
         let metrics = get_metrics();
 
         Ok(metrics)
