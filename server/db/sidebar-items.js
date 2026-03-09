@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["sqlite_path"],"struct":["Database"]};

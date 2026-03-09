@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["FUNCTIONS_DB_TREE"],"fn":["create_service"],"struct":["FunctionServiceImpl"]};
+window.SIDEBAR_ITEMS = {"fn":["create_service"],"struct":["FunctionServiceImpl"]};
