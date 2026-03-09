@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["ensure_linked","kvmserverguest_remote_resume"],"static":["INIT"]};
+window.SIDEBAR_ITEMS = {"constant":["STORAGE"],"fn":["ensure_linked","kvmserverguest_remote_resume","kvmserverguest_storage_wait_paused","remote_resume","storage"],"static":["INIT"],"struct":["Storage"]};
