@@ -13,9 +13,17 @@ if ! id -u faasta &>/dev/null; then
   useradd -r -s /bin/false faasta
 fi
 
+# Allow the faasta service user to access /dev/kvm when nested virtualization
+# is enabled on the host.
+if getent group kvm &>/dev/null; then
+  echo "Adding faasta user to kvm group..."
+  usermod -aG kvm faasta
+fi
+
 # Create directories
 echo "Creating directories..."
 mkdir -p /opt/faasta /var/lib/faasta
+mkdir -p /opt/faasta/data /opt/faasta/functions /opt/faasta/certs
 touch /var/log/faasta.log /var/log/faasta.error.log /var/log/faasta-updater.log
 
 # Set permissions

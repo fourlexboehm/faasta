@@ -14,6 +14,7 @@ log() {
 
 # Create directories if they don't exist
 mkdir -p "$INSTALL_DIR" "$DATA_DIR"
+mkdir -p "$INSTALL_DIR/data" "$INSTALL_DIR/functions" "$INSTALL_DIR/certs"
 touch "$LOG_FILE"
 
 log "Starting Faasta update process"
