@@ -1,7 +1,6 @@
 use dashmap::DashMap;
 use faasta_interface::{FunctionMetricsResponse, Metrics};
 use once_cell::sync::Lazy;
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time;
@@ -140,12 +139,7 @@ impl FunctionMetric {
 }
 
 fn function_artifact_exists(function_name: &str) -> bool {
-    let functions_dir =
-        std::env::var("FUNCTIONS_PATH").unwrap_or_else(|_| "./functions".to_string());
-
-    let artifact_filename = format!("{function_name}.so");
-    let artifact_path = Path::new(&functions_dir).join(&artifact_filename);
-    artifact_path.exists()
+    storage::artifact_exists(function_name).unwrap_or(false)
 }
 
 pub fn get_metrics() -> Metrics {

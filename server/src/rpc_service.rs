@@ -1,9 +1,9 @@
+use crate::function_runtime::{self, SERVER};
 use crate::metrics::get_metrics;
 use crate::storage;
-use crate::wasi_server::{self, SERVER};
 use faasta_interface::{FunctionError, FunctionInfo, FunctionResult, FunctionService, Metrics};
 use std::fs;
-use std::io::Write;
+use std::hash::{Hash, Hasher};
 use tracing::{debug, error, info};
 
 /// Implementation of the FunctionService
@@ -28,6 +28,61 @@ impl FunctionServiceImpl {
 
 // Helper implementation that uses references to avoid cloning
 impl FunctionServiceImpl {
+    fn validate_artifact_bytes(name: &str, artifact_bytes: &[u8]) -> FunctionResult<()> {
+        let server = SERVER.get().unwrap();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        name.hash(&mut hasher);
+        artifact_bytes.hash(&mut hasher);
+        let nonce = hasher.finish();
+        let validation_dir = server.functions_dir.join(".validation");
+        let validation_path = validation_dir.join(format!("{name}-{nonce:016x}.so"));
+
+        fs::create_dir_all(&validation_dir).map_err(|e| {
+            FunctionError::InternalError(format!(
+                "Failed to create validation directory {}: {e}",
+                validation_dir.display()
+            ))
+        })?;
+
+        fs::write(&validation_path, artifact_bytes).map_err(|e| {
+            FunctionError::InternalError(format!(
+                "Failed to write validation artifact {}: {e}",
+                validation_path.display()
+            ))
+        })?;
+
+        let symbol_name = function_runtime::function_symbol_name(name);
+        let validation_result = unsafe {
+            let library = libloading::Library::new(&validation_path).map_err(|e| {
+                FunctionError::InvalidInput(format!(
+                    "Uploaded artifact is not a valid shared library: {e}"
+                ))
+            })?;
+            let validation_result: Result<(), FunctionError> = library
+                .get::<libloading::Symbol<*const ()>>(symbol_name.as_bytes())
+                .map(|_| ())
+                .map_err(|e| {
+                    FunctionError::InvalidInput(format!(
+                        "Shared library is missing expected symbol '{symbol_name}': {e}"
+                    ))
+                });
+            drop(library);
+            validation_result
+        };
+
+        if let Err(err) = fs::remove_file(&validation_path)
+            && err.kind() != std::io::ErrorKind::NotFound
+        {
+            debug!(
+                "failed to remove validation artifact {}: {}",
+                validation_path.display(),
+                err
+            );
+        }
+
+        validation_result
+    }
+
     pub(crate) async fn publish_impl(
         &self,
         artifact_bytes: Vec<u8>,
@@ -67,49 +122,33 @@ impl FunctionServiceImpl {
             )));
         }
 
-        // Expect a pre-built native shared object for the function
-        let artifact_filename = format!("{name}.so");
-        let artifact_path = server.functions_dir.join(&artifact_filename);
+        let existing_entry = storage::get_function(&name).map_err(|e| {
+            FunctionError::InternalError(format!("Failed to get function metadata: {e}"))
+        })?;
 
-        // Check if function already exists
-        if artifact_path.exists() {
-            let entry_result = storage::get_function(&name).map_err(|e| {
-                FunctionError::InternalError(format!("Failed to get function metadata: {e}"))
-            })?;
+        let is_new_function = existing_entry.is_none();
 
-            if let Some(entry_bytes) = entry_result {
-                // Deserialize the function info
-                let function_info = match bincode::decode_from_slice::<FunctionInfo, _>(
-                    &entry_bytes,
-                    bincode::config::standard(),
-                ) {
-                    Ok((info, _)) => info,
-                    Err(e) => {
-                        error!("Failed to deserialize function info: {}", e);
-                        return Err(FunctionError::InternalError(format!(
-                            "Failed to deserialize function info: {e}"
-                        )));
-                    }
-                };
-
-                // Check if user owns the function
-                if function_info.owner != username {
-                    return Err(FunctionError::PermissionDenied(
-                        "A function with this name already exists and belongs to another user"
-                            .to_string(),
-                    ));
+        if let Some(entry_bytes) = existing_entry {
+            let function_info = match bincode::decode_from_slice::<FunctionInfo, _>(
+                &entry_bytes,
+                bincode::config::standard(),
+            ) {
+                Ok((info, _)) => info,
+                Err(e) => {
+                    error!("Failed to deserialize function info: {}", e);
+                    return Err(FunctionError::InternalError(format!(
+                        "Failed to deserialize function info: {e}"
+                    )));
                 }
-                // Function exists and user owns it - proceed with update
-            } else {
-                // Function exists on disk but not in memory db - this is inconsistent state
-                // Still enforce ownership check through GitHub auth
+            };
+
+            if function_info.owner != username {
                 return Err(FunctionError::PermissionDenied(
-                    "A function with this name already exists. Please choose a different name."
+                    "A function with this name already exists and belongs to another user"
                         .to_string(),
                 ));
             }
         } else {
-            // New function - enforce project limit
             if !server
                 .github_auth
                 .can_upload_project(&username, &name)
@@ -124,79 +163,45 @@ impl FunctionServiceImpl {
                     "You have reached the maximum limit of 10 projects".to_string(),
                 ));
             }
-            // Register ownership
-            match server.github_auth.add_project(&username, &name).await {
-                Ok(_) => debug!("Added project '{}' for user '{}'", name, username),
-                Err(e) => {
-                    error!("Failed to add project: {}", e);
-                    return Err(FunctionError::InternalError(format!(
-                        "Failed to add project: {e}"
-                    )));
-                }
-            }
         }
 
-        // When publishing a new version, clear any existing cache entry
-        if let Some(server) = SERVER.get() {
-            server.remove_from_cache(&name).await;
-        }
+        Self::validate_artifact_bytes(&name, &artifact_bytes)?;
 
-        // Create a temporary file path to avoid race conditions
-        let temp_path = artifact_path.with_extension("so.tmp");
-
-        // Write to temporary path first
-        let mut file = fs::File::create(&temp_path).map_err(|e| {
-            FunctionError::InternalError(format!("Failed to create temp file: {e}"))
+        storage::put_artifact(&name, &artifact_bytes).map_err(|e| {
+            FunctionError::InternalError(format!("Failed to persist artifact bytes: {e}"))
         })?;
-        file.write_all(&artifact_bytes)
-            .map_err(|e| FunctionError::InternalError(format!("Failed to write temp file: {e}")))?;
-
-        // Ensure file is flushed to disk
-        file.sync_all()
-            .map_err(|e| FunctionError::InternalError(format!("Failed to sync temp file: {e}")))?;
-
-        // Atomically rename to final path
-        fs::rename(&temp_path, &artifact_path)
-            .map_err(|e| FunctionError::InternalError(format!("Failed to commit file: {e}")))?;
-
-        // Validate the library exports the expected symbol upfront so we can surface
-        // errors during publish rather than on first request.
-        let symbol_name = wasi_server::function_symbol_name(&name);
-        unsafe {
-            let library = libloading::Library::new(&artifact_path).map_err(|e| {
-                FunctionError::InvalidInput(format!(
-                    "Uploaded artifact is not a valid shared library: {e}"
-                ))
-            })?;
-            let validation_result: Result<(), FunctionError> = library
-                .get::<libloading::Symbol<*const ()>>(symbol_name.as_bytes())
-                .map(|_| ())
-                .map_err(|e| {
-                    FunctionError::InvalidInput(format!(
-                        "Shared library is missing expected symbol '{symbol_name}': {e}"
-                    ))
-                });
-            drop(library);
-            validation_result?;
-        }
 
         // Create function info with both subdomain and path-based URLs
         let now = chrono::Utc::now().to_rfc3339();
         let function_info = FunctionInfo {
             name: name.clone(),
-            owner: username,
+            owner: username.clone(),
             published_at: now,
             usage: format!("https://{name}.faasta.lol or https://faasta.lol/{name}"),
         };
 
-        // Serialize metadata with bincode
         let meta =
             bincode::encode_to_vec(&function_info, bincode::config::standard()).map_err(|e| {
                 FunctionError::InternalError(format!("Failed to serialize function metadata: {e}"))
             })?;
-        storage::put_function(&name, &meta).map_err(|e| {
-            FunctionError::InternalError(format!("Failed to persist function metadata: {e}"))
-        })?;
+        if let Err(err) = storage::put_function(&name, &meta) {
+            let _ = storage::delete_artifact(&name);
+            return Err(FunctionError::InternalError(format!(
+                "Failed to persist function metadata: {err}"
+            )));
+        }
+
+        if is_new_function && let Err(err) = server.github_auth.add_project(&username, &name).await
+        {
+            error!("Failed to add project: {}", err);
+            let _ = storage::delete_function(&name);
+            let _ = storage::delete_artifact(&name);
+            return Err(FunctionError::InternalError(format!(
+                "Failed to add project: {err}"
+            )));
+        }
+
+        server.invalidate_function(&name).await;
 
         Ok(format!("Function '{name}' published successfully"))
     }
@@ -312,33 +317,29 @@ impl FunctionServiceImpl {
                 ));
             }
 
-            // Remove the shared object for the function
-            let artifact_filename = format!("{name}.so");
-            let artifact_path = server.functions_dir.join(artifact_filename);
-            if artifact_path.exists() {
-                if let Err(e) = fs::remove_file(&artifact_path) {
-                    error!("Failed to remove shared object: {e}");
-                } else {
-                    debug!("Successfully removed shared object for function '{name}'");
-                }
-            }
+            storage::delete_artifact(&name).map_err(|e| {
+                error!("Failed to remove artifact bytes for '{name}': {e}");
+                FunctionError::InternalError(format!("Failed to remove artifact bytes: {e}"))
+            })?;
+            debug!("Successfully removed artifact bytes for function '{name}'");
 
-            // Remove metadata from sqlite
-            match storage::delete_function(&name) {
-                Ok(_) => debug!("Successfully removed metadata for function '{name}'"),
-                Err(e) => error!("Failed to remove function metadata for '{name}': {e}"),
-                // We don't return an error here because the function was already removed
-            }
+            storage::delete_function(&name).map_err(|e| {
+                error!("Failed to remove function metadata for '{name}': {e}");
+                FunctionError::InternalError(format!("Failed to remove function metadata: {e}"))
+            })?;
+            debug!("Successfully removed metadata for function '{name}'");
 
-            // Remove the project from the user's list
-            match server.github_auth.remove_project(&username, &name).await {
-                Ok(_) => {
-                    debug!("Removed project '{name}' for user '{username}'");
-                }
-                Err(e) => {
+            server
+                .github_auth
+                .remove_project(&username, &name)
+                .await
+                .map_err(|e| {
                     error!("Failed to remove project: {e}");
-                }
-            }
+                    FunctionError::InternalError(format!("Failed to remove project ownership: {e}"))
+                })?;
+            debug!("Removed project '{name}' for user '{username}'");
+
+            server.invalidate_function(&name).await;
 
             info!("Function '{name}' unpublished successfully");
             Ok(())

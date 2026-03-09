@@ -6,6 +6,7 @@ use crate::kvm_guest;
 
 const FUNCTIONS_DB_TREE: &str = "functions";
 const USER_DB_TREE: &str = "user_data";
+const ARTIFACTS_DB_TREE: &str = "artifacts";
 const STORAGE_BUFFER_SIZE: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Encode, Decode)]
@@ -18,6 +19,19 @@ enum StorageRequest {
         data: Vec<u8>,
     },
     DeleteFunction {
+        name: String,
+    },
+    GetArtifact {
+        name: String,
+    },
+    PutArtifact {
+        name: String,
+        bytes: Vec<u8>,
+    },
+    DeleteArtifact {
+        name: String,
+    },
+    ArtifactExists {
         name: String,
     },
     GetUser {
@@ -47,6 +61,7 @@ enum StorageRequest {
 enum StorageReply {
     Unit,
     Bytes(Option<Vec<u8>>),
+    Bool(bool),
     Metric(Option<(u64, u64, u64)>),
     MetricExists(bool),
     Metrics(Vec<(String, u64, u64, u64)>),
@@ -73,6 +88,37 @@ pub fn delete_function(name: &str) -> Result<()> {
     expect_unit(call(StorageRequest::DeleteFunction {
         name: name.to_string(),
     })?)
+}
+
+pub fn get_artifact(name: &str) -> Result<Option<Vec<u8>>> {
+    match call(StorageRequest::GetArtifact {
+        name: name.to_string(),
+    })? {
+        StorageReply::Bytes(value) => Ok(value),
+        other => unexpected_reply("Bytes", other),
+    }
+}
+
+pub fn put_artifact(name: &str, bytes: &[u8]) -> Result<()> {
+    expect_unit(call(StorageRequest::PutArtifact {
+        name: name.to_string(),
+        bytes: bytes.to_vec(),
+    })?)
+}
+
+pub fn delete_artifact(name: &str) -> Result<()> {
+    expect_unit(call(StorageRequest::DeleteArtifact {
+        name: name.to_string(),
+    })?)
+}
+
+pub fn artifact_exists(name: &str) -> Result<bool> {
+    match call(StorageRequest::ArtifactExists {
+        name: name.to_string(),
+    })? {
+        StorageReply::Bool(value) => Ok(value),
+        other => unexpected_reply("Bool", other),
+    }
 }
 
 pub fn get_user(username: &str) -> Result<Option<Vec<u8>>> {
@@ -184,6 +230,9 @@ pub fn run_storage_vm(db_path: &Path, metrics_db_path: &Path) -> Result<()> {
     let user_tree = metadata_db
         .open_tree(USER_DB_TREE)
         .context("failed to open user tree")?;
+    let artifacts_tree = metadata_db
+        .open_tree(ARTIFACTS_DB_TREE)
+        .context("failed to open artifacts tree")?;
 
     let mut return_value = 0isize;
     let mut storage = kvm_guest::storage().context("storage VM is unavailable")?;
@@ -192,9 +241,13 @@ pub fn run_storage_vm(db_path: &Path, metrics_db_path: &Path) -> Result<()> {
         return_value = match storage.wait_paused(return_value) {
             Err(code) => code,
             Ok(None) => 0,
-            Ok(Some(buffer)) => {
-                handle_storage_request(buffer, &functions_tree, &user_tree, &metrics_db)
-            }
+            Ok(Some(buffer)) => handle_storage_request(
+                buffer,
+                &functions_tree,
+                &user_tree,
+                &artifacts_tree,
+                &metrics_db,
+            ),
         };
     }
 }
@@ -203,6 +256,7 @@ fn handle_storage_request(
     buffer: &mut [u8],
     functions_tree: &sled::Tree,
     user_tree: &sled::Tree,
+    artifacts_tree: &sled::Tree,
     metrics_db: &sled::Db,
 ) -> isize {
     let request =
@@ -210,7 +264,7 @@ fn handle_storage_request(
             .map(|(req, _)| req);
 
     let reply = match request {
-        Ok(req) => process_request(req, functions_tree, user_tree, metrics_db),
+        Ok(req) => process_request(req, functions_tree, user_tree, artifacts_tree, metrics_db),
         Err(err) => StorageReply::Error(format!("failed to decode storage request: {err}")),
     };
 
@@ -237,6 +291,7 @@ fn process_request(
     request: StorageRequest,
     functions_tree: &sled::Tree,
     user_tree: &sled::Tree,
+    artifacts_tree: &sled::Tree,
     metrics_db: &sled::Db,
 ) -> StorageReply {
     let result: Result<StorageReply> = match request {
@@ -252,6 +307,22 @@ fn process_request(
             .remove(name.as_bytes())
             .context("failed to delete function metadata")
             .map(|_| StorageReply::Unit),
+        StorageRequest::GetArtifact { name } => artifacts_tree
+            .get(name.as_bytes())
+            .context("failed to get artifact bytes")
+            .map(|value| StorageReply::Bytes(value.map(|v| v.to_vec()))),
+        StorageRequest::PutArtifact { name, bytes } => artifacts_tree
+            .insert(name.as_bytes(), bytes)
+            .context("failed to persist artifact bytes")
+            .map(|_| StorageReply::Unit),
+        StorageRequest::DeleteArtifact { name } => artifacts_tree
+            .remove(name.as_bytes())
+            .context("failed to delete artifact bytes")
+            .map(|_| StorageReply::Unit),
+        StorageRequest::ArtifactExists { name } => artifacts_tree
+            .contains_key(name.as_bytes())
+            .context("failed to check artifact existence")
+            .map(StorageReply::Bool),
         StorageRequest::GetUser { username } => user_tree
             .get(username.as_bytes())
             .context("failed to get user data")
@@ -324,5 +395,75 @@ fn ensure_dir(path: &Path) -> Result<()> {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         Err(err) => Err(err.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn artifact_requests_use_dedicated_tree() {
+        let config = sled::Config::new().temporary(true);
+        let db = config.open().expect("open temp sled");
+        let functions_tree = db.open_tree(FUNCTIONS_DB_TREE).expect("functions");
+        let user_tree = db.open_tree(USER_DB_TREE).expect("users");
+        let artifacts_tree = db.open_tree(ARTIFACTS_DB_TREE).expect("artifacts");
+
+        let reply = process_request(
+            StorageRequest::PutArtifact {
+                name: "demo".to_string(),
+                bytes: vec![1, 2, 3],
+            },
+            &functions_tree,
+            &user_tree,
+            &artifacts_tree,
+            &db,
+        );
+        assert!(matches!(reply, StorageReply::Unit));
+
+        let reply = process_request(
+            StorageRequest::GetArtifact {
+                name: "demo".to_string(),
+            },
+            &functions_tree,
+            &user_tree,
+            &artifacts_tree,
+            &db,
+        );
+        assert!(matches!(reply, StorageReply::Bytes(Some(bytes)) if bytes == vec![1, 2, 3]));
+
+        let reply = process_request(
+            StorageRequest::ArtifactExists {
+                name: "demo".to_string(),
+            },
+            &functions_tree,
+            &user_tree,
+            &artifacts_tree,
+            &db,
+        );
+        assert!(matches!(reply, StorageReply::Bool(true)));
+
+        let reply = process_request(
+            StorageRequest::DeleteArtifact {
+                name: "demo".to_string(),
+            },
+            &functions_tree,
+            &user_tree,
+            &artifacts_tree,
+            &db,
+        );
+        assert!(matches!(reply, StorageReply::Unit));
+
+        let reply = process_request(
+            StorageRequest::ArtifactExists {
+                name: "demo".to_string(),
+            },
+            &functions_tree,
+            &user_tree,
+            &artifacts_tree,
+            &db,
+        );
+        assert!(matches!(reply, StorageReply::Bool(false)));
     }
 }

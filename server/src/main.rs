@@ -25,19 +25,19 @@ use tower_http::trace::TraceLayer;
 use tracing::{Level, error, info};
 
 mod cert_manager;
+mod function_runtime;
 mod github_auth;
 mod kvm_guest;
 mod metrics;
 mod quic;
 mod rpc_service;
 mod storage;
-mod wasi_server;
 
 use cert_manager::CertManager;
+use function_runtime::{FaastaServer, SERVER, sanitize_function_name};
 use metrics::{get_metrics, spawn_periodic_flush};
 use rpc_service::create_service;
 use storage::run_storage_vm;
-use wasi_server::{FaastaServer, SERVER, sanitize_function_name};
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "faasta-server")]
@@ -356,7 +356,7 @@ async fn function_dispatch(
     };
 
     let Some(function_name) =
-        wasi_server::resolve_function_name(host_ref, uri.path(), &state.server.base_domain)
+        function_runtime::resolve_function_name(host_ref, uri.path(), &state.server.base_domain)
     else {
         return error_response(StatusCode::NOT_FOUND, "Function name missing");
     };

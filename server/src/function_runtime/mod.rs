@@ -1,8 +1,10 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use axum::body::Body;
 use bytes::Bytes;
 use cap_async_std::ambient_authority;
@@ -21,6 +23,7 @@ use tracing::debug;
 use crate::github_auth::GitHubAuth;
 use crate::kvm_guest;
 use crate::metrics::Timer;
+use crate::storage;
 
 pub static SERVER: OnceCell<Arc<FaastaServer>> = OnceCell::new();
 
@@ -55,6 +58,7 @@ impl LoadedFunction {
 pub struct FaastaServer {
     pub base_domain: String,
     pub functions_dir: PathBuf,
+    cache_root: PathBuf,
     sandbox_root: PathBuf,
     pub github_auth: GitHubAuth,
     loaded: DashMap<String, Arc<LoadedFunction>>,
@@ -72,6 +76,11 @@ impl FaastaServer {
             )
         })?;
 
+        let cache_root = functions_dir.join("cache");
+        ensure_dir(&cache_root)
+            .await
+            .with_context(|| format!("failed to create cache directory at {:?}", cache_root))?;
+
         let sandbox_root = functions_dir.join("sandbox");
         ensure_dir(&sandbox_root)
             .await
@@ -82,6 +91,7 @@ impl FaastaServer {
         Ok(Self {
             base_domain,
             functions_dir,
+            cache_root,
             sandbox_root,
             github_auth,
             loaded: DashMap::new(),
@@ -89,19 +99,74 @@ impl FaastaServer {
         })
     }
 
-    pub fn artifact_path(&self, function_name: &str) -> PathBuf {
-        self.functions_dir.join(format!("{function_name}.so"))
-    }
-
     fn symbol_name(function_name: &str) -> String {
         function_symbol_name(function_name)
     }
 
-    fn ensure_exists(path: &Path) -> Result<()> {
-        if !path.exists() {
-            bail!("function artifact missing at {}", path.display());
+    fn artifact_version(bytes: &[u8]) -> String {
+        let mut hasher = DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    }
+
+    fn materialized_artifact_dir(&self, function_name: &str) -> PathBuf {
+        self.cache_root.join(function_name)
+    }
+
+    fn materialized_artifact_path_for_version(
+        &self,
+        function_name: &str,
+        artifact_version: &str,
+    ) -> PathBuf {
+        self.materialized_artifact_dir(function_name)
+            .join(artifact_version)
+            .join("artifact.so")
+    }
+
+    async fn materialize_artifact(
+        &self,
+        function_name: &str,
+        artifact_bytes: &[u8],
+    ) -> Result<PathBuf> {
+        let artifact_version = Self::artifact_version(artifact_bytes);
+        let artifact_path =
+            self.materialized_artifact_path_for_version(function_name, &artifact_version);
+
+        if artifact_path.exists() {
+            return Ok(artifact_path);
         }
-        Ok(())
+
+        let artifact_dir = artifact_path
+            .parent()
+            .context("materialized artifact path missing parent")?;
+        ensure_dir(artifact_dir).await.with_context(|| {
+            format!(
+                "failed to create private artifact directory {}",
+                artifact_dir.display()
+            )
+        })?;
+
+        let temp_path = artifact_dir.join("artifact.so.tmp");
+        fs::write(&temp_path, artifact_bytes)
+            .await
+            .with_context(|| format!("failed to write private artifact {}", temp_path.display()))?;
+        fs::rename(&temp_path, &artifact_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to finalize private artifact materialization {}",
+                    artifact_path.display()
+                )
+            })?;
+
+        Ok(artifact_path)
+    }
+
+    async fn load_artifact_path(&self, function_name: &str) -> Result<PathBuf> {
+        let artifact_bytes = storage::get_artifact(function_name)?
+            .ok_or_else(|| anyhow::anyhow!("function artifact missing for {function_name}"))?;
+        self.materialize_artifact(function_name, &artifact_bytes)
+            .await
     }
 
     fn evict_if_needed(&self) {
@@ -121,8 +186,7 @@ impl FaastaServer {
             return Ok(handle.clone());
         }
 
-        let artifact_path = self.artifact_path(function_name);
-        Self::ensure_exists(&artifact_path)?;
+        let artifact_path = self.load_artifact_path(function_name).await?;
 
         // Safety: the library is trusted to export the expected symbol.
         let library = unsafe {
@@ -165,6 +229,25 @@ impl FaastaServer {
         debug!("removed cached function {function_name}");
     }
 
+    pub async fn invalidate_function(&self, function_name: &str) {
+        self.remove_from_cache(function_name).await;
+
+        let function_cache_dir = self.materialized_artifact_dir(function_name);
+        match fs::remove_dir_all(&function_cache_dir).await {
+            Ok(()) => {
+                debug!("removed private artifact cache for {function_name}");
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                debug!(
+                    "failed to remove private artifact cache {}: {}",
+                    function_cache_dir.display(),
+                    err
+                );
+            }
+        }
+    }
+
     pub async fn invoke(
         &self,
         function_name: &str,
@@ -191,7 +274,7 @@ impl FaastaServer {
     }
 
     pub fn function_exists(&self, function_name: &str) -> bool {
-        self.artifact_path(function_name).exists()
+        storage::artifact_exists(function_name).unwrap_or(false)
     }
 }
 
@@ -297,4 +380,32 @@ pub fn sanitize_function_name(function_name: &str) -> Option<String> {
 pub fn function_symbol_name(function_name: &str) -> String {
     let sanitized = function_name.replace('-', "_");
     format!("dy_{sanitized}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FaastaServer;
+    use std::path::PathBuf;
+
+    #[test]
+    fn materialized_artifact_path_is_versioned_and_private() {
+        let server = FaastaServer {
+            base_domain: "faasta.lol".to_string(),
+            functions_dir: PathBuf::from("/tmp/functions"),
+            cache_root: PathBuf::from("/tmp/functions/cache"),
+            sandbox_root: PathBuf::from("/tmp/functions/sandbox"),
+            github_auth: crate::github_auth::GitHubAuth,
+            loaded: dashmap::DashMap::new(),
+            max_cached_functions: 1,
+        };
+
+        let bytes = b"library-bytes";
+        let version = FaastaServer::artifact_version(bytes);
+        let path = server.materialized_artifact_path_for_version("demo", &version);
+
+        assert_eq!(
+            path,
+            PathBuf::from(format!("/tmp/functions/cache/demo/{version}/artifact.so"))
+        );
+    }
 }
