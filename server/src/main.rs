@@ -16,7 +16,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::io;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -188,7 +188,7 @@ async fn main() -> Result<()> {
         .context("https server error")
 }
 
-fn ensure_dir(path: &Path, label: &str) -> Result<()> {
+fn ensure_dir(path: &FsPath, label: &str) -> Result<()> {
     if path.is_dir() {
         return Ok(());
     }
