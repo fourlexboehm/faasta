@@ -16,7 +16,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::io;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -111,14 +111,8 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    std::fs::create_dir_all(&args.functions_path).with_context(|| {
-        format!(
-            "failed to create functions directory at {:?}",
-            args.functions_path
-        )
-    })?;
-    std::fs::create_dir_all(&args.certs_dir)
-        .with_context(|| format!("failed to create cert directory at {:?}", args.certs_dir))?;
+    ensure_dir(&args.functions_path, "functions")?;
+    ensure_dir(&args.certs_dir, "cert")?;
 
     if args.auto_cert {
         let cert_manager = Arc::new(CertManager::new(
@@ -192,6 +186,15 @@ async fn main() -> Result<()> {
         .serve(router.into_make_service())
         .await
         .context("https server error")
+}
+
+fn ensure_dir(path: &Path, label: &str) -> Result<()> {
+    if path.is_dir() {
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(path)
+        .with_context(|| format!("failed to create {label} directory at {:?}", path))
 }
 
 fn build_rpc_runtime(driver: RpcDriver) -> io::Result<compio::runtime::Runtime> {
