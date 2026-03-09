@@ -111,8 +111,6 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    std::fs::create_dir_all(&args.db_path)
-        .with_context(|| format!("failed to create db directory at {:?}", args.db_path))?;
     std::fs::create_dir_all(&args.functions_path).with_context(|| {
         format!(
             "failed to create functions directory at {:?}",
