@@ -16,7 +16,9 @@ pub static FUNCTION_METRICS: Lazy<DashMap<String, FunctionMetric>> = Lazy::new(D
 // SQLite database for persistent storage
 pub static METRICS_DB: Lazy<Arc<Database>> = Lazy::new(|| {
     let db_path = std::env::var("METRICS_DB_PATH").unwrap_or_else(|_| "./data/metrics".to_string());
-    Arc::new(Database::open(std::path::Path::new(&db_path)).expect("Failed to open metrics database"))
+    Arc::new(
+        Database::open(std::path::Path::new(&db_path)).expect("Failed to open metrics database"),
+    )
 });
 
 #[derive(Debug)]

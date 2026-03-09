@@ -81,7 +81,8 @@ impl Database {
         let conn = self.conn.lock().expect("sqlite mutex poisoned");
         let mut stmt = conn.prepare("SELECT username, data FROM user_data")?;
         let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 
     pub fn get_metric(&self, function_name: &str) -> Result<Option<(u64, u64, u64)>> {
@@ -132,7 +133,8 @@ impl Database {
         let rows = stmt.query_map([], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
         })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(Into::into)
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 
     pub fn flush(&self) -> Result<()> {
