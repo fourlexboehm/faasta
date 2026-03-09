@@ -11,8 +11,15 @@ impl Database {
     pub fn open(base_path: &Path) -> Result<Self> {
         let db_path = sqlite_path(base_path, "faasta.sqlite3");
         if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create sqlite parent dir {:?}", parent))?;
+            match std::fs::create_dir_all(parent) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(err) => {
+                    return Err(err).with_context(|| {
+                        format!("failed to create sqlite parent dir {:?}", parent)
+                    });
+                }
+            }
         }
 
         let conn =

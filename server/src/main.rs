@@ -189,12 +189,13 @@ async fn main() -> Result<()> {
 }
 
 fn ensure_dir(path: &FsPath, label: &str) -> Result<()> {
-    if path.is_dir() {
-        return Ok(());
+    match std::fs::create_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(err) => {
+            Err(err).with_context(|| format!("failed to create {label} directory at {:?}", path))
+        }
     }
-
-    std::fs::create_dir_all(path)
-        .with_context(|| format!("failed to create {label} directory at {:?}", path))
 }
 
 fn build_rpc_runtime(driver: RpcDriver) -> io::Result<compio::runtime::Runtime> {
