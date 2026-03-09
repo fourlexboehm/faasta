@@ -25,19 +25,19 @@
 <a href=#25 id=25 data-nosnippet>25</a><span class="kw">use </span>tracing::{Level, error, info};
 <a href=#26 id=26 data-nosnippet>26</a>
 <a href=#27 id=27 data-nosnippet>27</a><span class="kw">mod </span>cert_manager;
-<a href=#28 id=28 data-nosnippet>28</a><span class="kw">mod </span>github_auth;
-<a href=#29 id=29 data-nosnippet>29</a><span class="kw">mod </span>kvm_guest;
-<a href=#30 id=30 data-nosnippet>30</a><span class="kw">mod </span>metrics;
-<a href=#31 id=31 data-nosnippet>31</a><span class="kw">mod </span>quic;
-<a href=#32 id=32 data-nosnippet>32</a><span class="kw">mod </span>rpc_service;
-<a href=#33 id=33 data-nosnippet>33</a><span class="kw">mod </span>storage;
-<a href=#34 id=34 data-nosnippet>34</a><span class="kw">mod </span>wasi_server;
+<a href=#28 id=28 data-nosnippet>28</a><span class="kw">mod </span>function_runtime;
+<a href=#29 id=29 data-nosnippet>29</a><span class="kw">mod </span>github_auth;
+<a href=#30 id=30 data-nosnippet>30</a><span class="kw">mod </span>kvm_guest;
+<a href=#31 id=31 data-nosnippet>31</a><span class="kw">mod </span>metrics;
+<a href=#32 id=32 data-nosnippet>32</a><span class="kw">mod </span>quic;
+<a href=#33 id=33 data-nosnippet>33</a><span class="kw">mod </span>rpc_service;
+<a href=#34 id=34 data-nosnippet>34</a><span class="kw">mod </span>storage;
 <a href=#35 id=35 data-nosnippet>35</a>
 <a href=#36 id=36 data-nosnippet>36</a><span class="kw">use </span>cert_manager::CertManager;
-<a href=#37 id=37 data-nosnippet>37</a><span class="kw">use </span>metrics::{get_metrics, spawn_periodic_flush};
-<a href=#38 id=38 data-nosnippet>38</a><span class="kw">use </span>rpc_service::create_service;
-<a href=#39 id=39 data-nosnippet>39</a><span class="kw">use </span>storage::run_storage_vm;
-<a href=#40 id=40 data-nosnippet>40</a><span class="kw">use </span>wasi_server::{FaastaServer, SERVER, sanitize_function_name};
+<a href=#37 id=37 data-nosnippet>37</a><span class="kw">use </span>function_runtime::{FaastaServer, SERVER, sanitize_function_name};
+<a href=#38 id=38 data-nosnippet>38</a><span class="kw">use </span>metrics::{get_metrics, spawn_periodic_flush};
+<a href=#39 id=39 data-nosnippet>39</a><span class="kw">use </span>rpc_service::create_service;
+<a href=#40 id=40 data-nosnippet>40</a><span class="kw">use </span>storage::run_storage_vm;
 <a href=#41 id=41 data-nosnippet>41</a>
 <a href=#42 id=42 data-nosnippet>42</a><span class="attr">#[derive(Parser, Debug, Clone)]
 <a href=#43 id=43 data-nosnippet>43</a>#[command(name = <span class="string">"faasta-server"</span>)]
@@ -356,7 +356,7 @@
 <a href=#356 id=356 data-nosnippet>356</a>    };
 <a href=#357 id=357 data-nosnippet>357</a>
 <a href=#358 id=358 data-nosnippet>358</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(function_name) =
-<a href=#359 id=359 data-nosnippet>359</a>        wasi_server::resolve_function_name(host_ref, uri.path(), <span class="kw-2">&amp;</span>state.server.base_domain)
+<a href=#359 id=359 data-nosnippet>359</a>        function_runtime::resolve_function_name(host_ref, uri.path(), <span class="kw-2">&amp;</span>state.server.base_domain)
 <a href=#360 id=360 data-nosnippet>360</a>    <span class="kw">else </span>{
 <a href=#361 id=361 data-nosnippet>361</a>        <span class="kw">return </span>error_response(StatusCode::NOT_FOUND, <span class="string">"Function name missing"</span>);
 <a href=#362 id=362 data-nosnippet>362</a>    };
