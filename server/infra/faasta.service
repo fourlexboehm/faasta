@@ -8,7 +8,7 @@ Type=simple
 User=faasta
 Group=faasta
 WorkingDirectory=/opt/faasta
-ExecStart=/bin/sh -lc 'exec /opt/faasta/kvmserver --cwd /opt/faasta --allow-read=/lib --allow-read=/usr/lib --allow-read=/etc/ssl --allow-read=/etc/resolv.conf --allow-read=/etc/hosts --allow-read=/etc/nsswitch.conf --allow-read=/etc/gai.conf --allow-write=/opt/faasta --allow-listen --allow-connect run -- /opt/faasta/faasta-server --base-domain faasta.lol'
+ExecStart=/bin/sh -lc 'exec /opt/faasta/kvmserver --cwd /opt/faasta --allow-read=/lib --allow-read=/usr/lib --allow-read=/etc/ssl --allow-read=/etc/resolv.conf --allow-read=/etc/hosts --allow-read=/etc/nsswitch.conf --allow-read=/etc/gai.conf --allow-write=/opt/faasta --allow-listen --allow-connect storage --1-to-1 /opt/faasta/faasta-server storage-vm --db-path ./data/db --metrics-db-path ./data/metrics ++ run /opt/faasta/faasta-server serve --base-domain faasta.lol'
 Restart=on-failure
 RestartSec=5
 

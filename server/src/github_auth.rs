@@ -1,19 +1,16 @@
 use anyhow::Result;
 use bincode::{Decode, Encode};
 use cyper::Client as HttpClient;
-use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::db::Database;
+use crate::storage;
 
 const MAX_PROJECTS_PER_USER: usize = 10;
 const USER_AGENT: &str = "faasta-server";
 
-pub struct GitHubAuth {
-    user_projects: DashMap<String, UserData>,
-    db: std::sync::Arc<Database>,
-}
+pub struct GitHubAuth;
+
 #[derive(Serialize, Deserialize, Clone, Debug, Encode, Decode)]
 pub struct UserData {
     pub github_username: String,
@@ -21,24 +18,11 @@ pub struct UserData {
 }
 
 impl GitHubAuth {
-    pub async fn new(db: std::sync::Arc<Database>) -> Result<Self> {
-        // Load existing user data
-        let user_projects = DashMap::new();
-        for (username, encoded) in db.iter_users()? {
-            if let Ok((user_data, _)) =
-                bincode::decode_from_slice::<UserData, _>(&encoded, bincode::config::standard())
-            {
-                user_projects.insert(username, user_data);
-            }
-        }
-
-        Ok(Self { user_projects, db })
+    pub async fn new() -> Result<Self> {
+        Ok(Self)
     }
 
-    /// Authenticate and extract username from GitHub token in a single API call
-    /// Returns (username, is_valid) tuple
     pub async fn authenticate_github(&self, token: &str) -> Result<(String, bool)> {
-        // Check if the token is in the format "username:token"
         let (provided_username, token_value) =
             if let Some((username, token_part)) = token.split_once(':') {
                 (
@@ -52,7 +36,6 @@ impl GitHubAuth {
                 (None, token.strip_prefix("Bearer ").unwrap_or(token).trim())
             };
 
-        // Build request to GitHub API using compio-native HTTP client
         let request = match HttpClient::new().get("https://api.github.com/user") {
             Ok(builder) => builder,
             Err(err) => {
@@ -90,18 +73,16 @@ impl GitHubAuth {
             return Ok(("".to_string(), false));
         }
 
-        // Parse response and extract username
         let github_user: Value = match response.json().await {
             Ok(json) => json,
-            Err(e) => {
-                tracing::error!("Failed to parse GitHub response: {}", e);
+            Err(err) => {
+                tracing::error!("Failed to parse GitHub response: {}", err);
                 return Ok(("".to_string(), false));
             }
         };
 
         let api_username = github_user["login"].as_str().unwrap_or("");
 
-        // If username was provided in token, verify it matches
         if let Some(provided) = provided_username
             && provided != api_username
         {
@@ -116,67 +97,51 @@ impl GitHubAuth {
         Ok((api_username.to_string(), true))
     }
 
-    /// Check if a user can upload more projects (limit is MAX_PROJECTS_PER_USER)
-    pub fn can_upload_project(&self, username: &str, project_name: &str) -> bool {
-        if let Some(user_data) = self.user_projects.get(username) {
-            // Check if they're already at the limit
-            if user_data.projects.len() >= MAX_PROJECTS_PER_USER
-                && !user_data.projects.contains(&project_name.to_string())
-            {
-                return false;
-            }
-        }
-        true
-    }
-
-    /// Add a project to a user's list
-    pub async fn add_project(&self, username: &str, project_name: &str) -> Result<()> {
-        // Get or create user data
-        let mut user_data = if let Some(data) = self.user_projects.get(username) {
-            data.clone()
-        } else {
-            UserData {
-                github_username: username.to_string(),
-                projects: Vec::new(),
-            }
+    pub async fn can_upload_project(&self, username: &str, project_name: &str) -> Result<bool> {
+        let Some(user_data) = self.get_user_data(username)? else {
+            return Ok(true);
         };
 
-        // Add or update the project
+        Ok(user_data.projects.len() < MAX_PROJECTS_PER_USER
+            || user_data.projects.contains(&project_name.to_string()))
+    }
+
+    pub async fn add_project(&self, username: &str, project_name: &str) -> Result<()> {
+        let mut user_data = self.get_user_data(username)?.unwrap_or(UserData {
+            github_username: username.to_string(),
+            projects: Vec::new(),
+        });
+
         if !user_data.projects.contains(&project_name.to_string()) {
             user_data.projects.push(project_name.to_string());
         }
 
-        // Update the map
-        self.user_projects
-            .insert(username.to_string(), user_data.clone());
-
-        // Save to database
         let encoded = bincode::encode_to_vec(&user_data, bincode::config::standard())?;
-        self.db.put_user(username, &encoded)?;
-
-        Ok(())
+        storage::put_user(username, &encoded)
     }
 
-    /// Remove a project from a user's list
     pub async fn remove_project(&self, username: &str, project_name: &str) -> Result<()> {
-        // Get user data
-        if let Some(mut user_data) = self.user_projects.get_mut(username) {
-            // Remove the project
+        if let Some(mut user_data) = self.get_user_data(username)? {
             user_data.projects.retain(|p| p != project_name);
-
-            // Save to database
-            let user_data_clone = user_data.clone();
-            let encoded = bincode::encode_to_vec(&user_data_clone, bincode::config::standard())?;
-            self.db.put_user(username, &encoded)?;
+            let encoded = bincode::encode_to_vec(&user_data, bincode::config::standard())?;
+            storage::put_user(username, &encoded)?;
         }
-
         Ok(())
     }
 
-    /// Get the list of projects owned by a user
-    pub fn get_user_projects(&self, username: &str) -> Option<Vec<String>> {
-        self.user_projects
-            .get(username)
-            .map(|user_data| user_data.projects.clone())
+    pub async fn get_user_projects(&self, username: &str) -> Result<Option<Vec<String>>> {
+        Ok(self
+            .get_user_data(username)?
+            .map(|user_data| user_data.projects))
+    }
+
+    fn get_user_data(&self, username: &str) -> Result<Option<UserData>> {
+        let Some(encoded) = storage::get_user(username)? else {
+            return Ok(None);
+        };
+
+        let (user_data, _) =
+            bincode::decode_from_slice::<UserData, _>(&encoded, bincode::config::standard())?;
+        Ok(Some(user_data))
     }
 }

@@ -1,4 +1,5 @@
 use crate::metrics::get_metrics;
+use crate::storage;
 use crate::wasi_server::{self, SERVER};
 use faasta_interface::{FunctionError, FunctionInfo, FunctionResult, FunctionService, Metrics};
 use std::fs;
@@ -72,7 +73,7 @@ impl FunctionServiceImpl {
 
         // Check if function already exists
         if artifact_path.exists() {
-            let entry_result = server.metadata_db.get_function(&name).map_err(|e| {
+            let entry_result = storage::get_function(&name).map_err(|e| {
                 FunctionError::InternalError(format!("Failed to get function metadata: {e}"))
             })?;
 
@@ -109,7 +110,16 @@ impl FunctionServiceImpl {
             }
         } else {
             // New function - enforce project limit
-            if !server.github_auth.can_upload_project(&username, &name) {
+            if !server
+                .github_auth
+                .can_upload_project(&username, &name)
+                .await
+                .map_err(|e| {
+                    FunctionError::InternalError(format!(
+                        "Failed to check project upload permissions: {e}"
+                    ))
+                })?
+            {
                 return Err(FunctionError::PermissionDenied(
                     "You have reached the maximum limit of 10 projects".to_string(),
                 ));
@@ -184,7 +194,7 @@ impl FunctionServiceImpl {
             bincode::encode_to_vec(&function_info, bincode::config::standard()).map_err(|e| {
                 FunctionError::InternalError(format!("Failed to serialize function metadata: {e}"))
             })?;
-        server.metadata_db.put_function(&name, &meta).map_err(|e| {
+        storage::put_function(&name, &meta).map_err(|e| {
             FunctionError::InternalError(format!("Failed to persist function metadata: {e}"))
         })?;
 
@@ -213,11 +223,18 @@ impl FunctionServiceImpl {
         let mut user_functions = Vec::new();
 
         // Get user data to find which projects they own
-        if let Some(projects) = server.github_auth.get_user_projects(&username) {
+        if let Some(projects) = server
+            .github_auth
+            .get_user_projects(&username)
+            .await
+            .map_err(|e| {
+                FunctionError::InternalError(format!("Failed to get user projects: {e}"))
+            })?
+        {
             // For each project owned by the user, get the function info
             for project_name in projects {
                 // Get function info from the functions tree
-                if let Ok(Some(value)) = server.metadata_db.get_function(&project_name) {
+                if let Ok(Some(value)) = storage::get_function(&project_name) {
                     // Deserialize the function info
                     match bincode::decode_from_slice::<FunctionInfo, _>(
                         &value,
@@ -265,7 +282,7 @@ impl FunctionServiceImpl {
         info!("Authentication successful for user: {username}");
 
         // Check if function exists
-        let entry_result = server.metadata_db.get_function(&name).map_err(|e| {
+        let entry_result = storage::get_function(&name).map_err(|e| {
             FunctionError::InternalError(format!("Failed to get function metadata: {e}"))
         })?;
 
@@ -307,7 +324,7 @@ impl FunctionServiceImpl {
             }
 
             // Remove metadata from sqlite
-            match server.metadata_db.delete_function(&name) {
+            match storage::delete_function(&name) {
                 Ok(_) => debug!("Successfully removed metadata for function '{name}'"),
                 Err(e) => error!("Failed to remove function metadata for '{name}': {e}"),
                 // We don't return an error here because the function was already removed

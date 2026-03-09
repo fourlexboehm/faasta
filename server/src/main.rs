@@ -8,7 +8,7 @@ use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum_server::tls_rustls::RustlsConfig;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use compio::driver::{DriverType, ProactorBuilder};
 use compio::runtime::RuntimeBuilder;
 use faasta_interface::FunctionError;
@@ -25,24 +25,36 @@ use tower_http::trace::TraceLayer;
 use tracing::{Level, error, info};
 
 mod cert_manager;
-mod db;
 mod github_auth;
 mod kvm_guest;
 mod metrics;
 mod quic;
 mod rpc_service;
+mod storage;
 mod wasi_server;
 
 use cert_manager::CertManager;
-use db::Database;
 use metrics::{get_metrics, spawn_periodic_flush};
 use rpc_service::create_service;
+use storage::run_storage_vm;
 use wasi_server::{FaastaServer, SERVER, sanitize_function_name};
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "server")]
+#[command(name = "faasta-server")]
 #[command(about = "Faasta KVM HTTP Function Server", long_about = None)]
-struct Args {
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+enum Command {
+    Serve(ServeArgs),
+    StorageVm(StorageVmArgs),
+}
+
+#[derive(Parser, Debug, Clone)]
+struct ServeArgs {
     /// Address to listen on (e.g., 0.0.0.0:443)
     #[arg(short, long, env = "LISTEN_ADDR", default_value = "0.0.0.0:443")]
     listen_addr: SocketAddr,
@@ -67,10 +79,6 @@ struct Args {
     #[arg(long, env = "CERTS_DIR", default_value = "./certs")]
     certs_dir: PathBuf,
 
-    /// Path to the SQLite metadata database directory or file
-    #[arg(long, env = "DB_PATH", default_value = "./data/db")]
-    db_path: PathBuf,
-
     /// Path to the functions directory containing uploaded shared objects
     #[arg(long, env = "FUNCTIONS_PATH", default_value = "./functions")]
     functions_path: PathBuf,
@@ -86,6 +94,17 @@ struct Args {
     /// Auto-generate TLS certificate using Porkbun
     #[arg(long, env = "AUTO_CERT", default_value = "false")]
     auto_cert: bool,
+}
+
+#[derive(Parser, Debug, Clone)]
+struct StorageVmArgs {
+    /// Path to the metadata sled database directory
+    #[arg(long, env = "DB_PATH", default_value = "./data/db")]
+    db_path: PathBuf,
+
+    /// Path to the metrics sled database directory
+    #[arg(long, env = "METRICS_DB_PATH", default_value = "./data/metrics")]
+    metrics_db_path: PathBuf,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -109,8 +128,15 @@ async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
-    let args = Args::parse();
+    let cli = Cli::parse();
 
+    match cli.command {
+        Command::Serve(args) => run_server(args).await,
+        Command::StorageVm(args) => run_storage_vm(&args.db_path, &args.metrics_db_path),
+    }
+}
+
+async fn run_server(args: ServeArgs) -> Result<()> {
     ensure_dir(&args.functions_path, "functions")?;
     ensure_dir(&args.certs_dir, "cert")?;
 
@@ -128,16 +154,8 @@ async fn main() -> Result<()> {
         cert_manager.spawn_periodic_renewal();
     }
 
-    let metadata_db = Arc::new(Database::open(&args.db_path).context("failed to open sqlite db")?);
-
-    let server = Arc::new(
-        FaastaServer::new(
-            metadata_db,
-            args.base_domain.clone(),
-            args.functions_path.clone(),
-        )
-        .await?,
-    );
+    let server =
+        Arc::new(FaastaServer::new(args.base_domain.clone(), args.functions_path.clone()).await?);
     SERVER
         .set(server.clone())
         .map_err(|_| anyhow::anyhow!("server already initialised"))?;

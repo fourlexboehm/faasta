@@ -18,7 +18,6 @@ use once_cell::sync::OnceCell;
 use tokio::fs;
 use tracing::debug;
 
-use crate::db::Database;
 use crate::github_auth::GitHubAuth;
 use crate::kvm_guest;
 use crate::metrics::Timer;
@@ -54,7 +53,6 @@ impl LoadedFunction {
 }
 
 pub struct FaastaServer {
-    pub metadata_db: Arc<Database>,
     pub base_domain: String,
     pub functions_dir: PathBuf,
     sandbox_root: PathBuf,
@@ -64,31 +62,24 @@ pub struct FaastaServer {
 }
 
 impl FaastaServer {
-    pub async fn new(
-        metadata_db: Arc<Database>,
-        base_domain: String,
-        functions_dir: PathBuf,
-    ) -> Result<Self> {
+    pub async fn new(base_domain: String, functions_dir: PathBuf) -> Result<Self> {
         kvm_guest::ensure_linked();
 
-        if !functions_dir.exists() {
-            fs::create_dir_all(&functions_dir).await.with_context(|| {
-                format!(
-                    "failed to create functions directory at {:?}",
-                    functions_dir
-                )
-            })?;
-        }
+        ensure_dir(&functions_dir).await.with_context(|| {
+            format!(
+                "failed to create functions directory at {:?}",
+                functions_dir
+            )
+        })?;
 
         let sandbox_root = functions_dir.join("sandbox");
-        fs::create_dir_all(&sandbox_root)
+        ensure_dir(&sandbox_root)
             .await
             .with_context(|| format!("failed to create sandbox directory at {:?}", sandbox_root))?;
 
-        let github_auth = GitHubAuth::new(metadata_db.clone()).await?;
+        let github_auth = GitHubAuth::new().await?;
 
         Ok(Self {
-            metadata_db,
             base_domain,
             functions_dir,
             sandbox_root,
@@ -160,7 +151,7 @@ impl FaastaServer {
 
     pub async fn prepare_sandbox(&self, function_name: &str) -> Result<Dir> {
         let sandbox_path = self.sandbox_root.join(function_name);
-        fs::create_dir_all(&sandbox_path)
+        ensure_dir(&sandbox_path)
             .await
             .with_context(|| format!("failed to prepare sandbox for {function_name}"))?;
 
@@ -201,6 +192,14 @@ impl FaastaServer {
 
     pub fn function_exists(&self, function_name: &str) -> bool {
         self.artifact_path(function_name).exists()
+    }
+}
+
+async fn ensure_dir(path: &Path) -> Result<()> {
+    match fs::create_dir_all(path).await {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(err) => Err(err.into()),
     }
 }
 
