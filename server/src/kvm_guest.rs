@@ -3,6 +3,7 @@ use std::sync::Once;
 #[link(name = "kvmserverguest", kind = "static")]
 unsafe extern "C" {
     fn kvmserverguest_remote_resume(buffer: *mut u8, len: isize) -> isize;
+    #[allow(dead_code)]
     fn kvmserverguest_storage_wait_paused(bufferptr: *mut *mut u8, ret: isize) -> isize;
 }
 
@@ -17,6 +18,7 @@ pub fn ensure_linked() {
     });
 }
 
+#[allow(dead_code)]
 pub fn remote_resume(buffer: &mut [u8], len: usize) -> Result<usize, isize> {
     let response_len = unsafe { kvmserverguest_remote_resume(buffer.as_mut_ptr(), len as isize) };
     if response_len < 0 {
@@ -26,10 +28,12 @@ pub fn remote_resume(buffer: &mut [u8], len: usize) -> Result<usize, isize> {
     }
 }
 
+#[allow(dead_code)]
 pub struct Storage {
     _private: (),
 }
 
+#[allow(dead_code)]
 impl Storage {
     pub fn wait_paused(&mut self, return_value: isize) -> Result<Option<&mut [u8]>, isize> {
         let mut buffer_ptr = std::ptr::null_mut();
@@ -49,6 +53,7 @@ thread_local! {
     static STORAGE: std::cell::Cell<Option<()>> = const { std::cell::Cell::new(Some(())) };
 }
 
+#[allow(dead_code)]
 pub fn storage() -> Option<Storage> {
     STORAGE
         .with(|cell| cell.take())
