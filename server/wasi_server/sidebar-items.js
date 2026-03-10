@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["build_faasta_request","faasta_response_to_http","function_symbol_name","resolve_function_name","sanitize_function_name"],"static":["SERVER"],"struct":["FaastaServer","LoadedFunction"],"type":["HandleRequestFn"]};
