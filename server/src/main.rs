@@ -8,7 +8,7 @@ use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum_server::tls_rustls::RustlsConfig;
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use compio::driver::{DriverType, ProactorBuilder};
 use compio::runtime::RuntimeBuilder;
 use faasta_interface::FunctionError;
@@ -16,7 +16,7 @@ use serde::Serialize;
 use serde_json::json;
 use std::io;
 use std::net::SocketAddr;
-use std::path::{Path as FsPath, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
@@ -25,36 +25,24 @@ use tower_http::trace::TraceLayer;
 use tracing::{Level, error, info};
 
 mod cert_manager;
-mod function_runtime;
+mod db;
 mod github_auth;
 mod kvm_guest;
 mod metrics;
 mod quic;
 mod rpc_service;
-mod storage;
+mod wasi_server;
 
 use cert_manager::CertManager;
-use function_runtime::{FaastaServer, SERVER, sanitize_function_name};
+use db::Database;
 use metrics::{get_metrics, spawn_periodic_flush};
 use rpc_service::create_service;
-use storage::run_storage_vm;
+use wasi_server::{FaastaServer, SERVER, sanitize_function_name};
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "faasta-server")]
+#[command(name = "server")]
 #[command(about = "Faasta KVM HTTP Function Server", long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Subcommand, Debug, Clone)]
-enum Command {
-    Serve(ServeArgs),
-    StorageVm(StorageVmArgs),
-}
-
-#[derive(Parser, Debug, Clone)]
-struct ServeArgs {
+struct Args {
     /// Address to listen on (e.g., 0.0.0.0:443)
     #[arg(short, long, env = "LISTEN_ADDR", default_value = "0.0.0.0:443")]
     listen_addr: SocketAddr,
@@ -79,6 +67,10 @@ struct ServeArgs {
     #[arg(long, env = "CERTS_DIR", default_value = "./certs")]
     certs_dir: PathBuf,
 
+    /// Path to the SQLite metadata database directory or file
+    #[arg(long, env = "DB_PATH", default_value = "./data/db")]
+    db_path: PathBuf,
+
     /// Path to the functions directory containing uploaded shared objects
     #[arg(long, env = "FUNCTIONS_PATH", default_value = "./functions")]
     functions_path: PathBuf,
@@ -94,17 +86,6 @@ struct ServeArgs {
     /// Auto-generate TLS certificate using Porkbun
     #[arg(long, env = "AUTO_CERT", default_value = "false")]
     auto_cert: bool,
-}
-
-#[derive(Parser, Debug, Clone)]
-struct StorageVmArgs {
-    /// Path to the metadata sled database directory
-    #[arg(long, env = "DB_PATH", default_value = "./data/db")]
-    db_path: PathBuf,
-
-    /// Path to the metrics sled database directory
-    #[arg(long, env = "METRICS_DB_PATH", default_value = "./data/metrics")]
-    metrics_db_path: PathBuf,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -128,17 +109,18 @@ async fn main() -> Result<()> {
     let _ = dotenvy::dotenv();
     tracing_subscriber::fmt().with_max_level(Level::INFO).init();
 
-    let cli = Cli::parse();
+    let args = Args::parse();
 
-    match cli.command {
-        Command::Serve(args) => run_server(args).await,
-        Command::StorageVm(args) => run_storage_vm(&args.db_path, &args.metrics_db_path),
-    }
-}
-
-async fn run_server(args: ServeArgs) -> Result<()> {
-    ensure_dir(&args.functions_path, "functions")?;
-    ensure_dir(&args.certs_dir, "cert")?;
+    std::fs::create_dir_all(&args.db_path)
+        .with_context(|| format!("failed to create db directory at {:?}", args.db_path))?;
+    std::fs::create_dir_all(&args.functions_path).with_context(|| {
+        format!(
+            "failed to create functions directory at {:?}",
+            args.functions_path
+        )
+    })?;
+    std::fs::create_dir_all(&args.certs_dir)
+        .with_context(|| format!("failed to create cert directory at {:?}", args.certs_dir))?;
 
     if args.auto_cert {
         let cert_manager = Arc::new(CertManager::new(
@@ -154,8 +136,16 @@ async fn run_server(args: ServeArgs) -> Result<()> {
         cert_manager.spawn_periodic_renewal();
     }
 
-    let server =
-        Arc::new(FaastaServer::new(args.base_domain.clone(), args.functions_path.clone()).await?);
+    let metadata_db = Arc::new(Database::open(&args.db_path).context("failed to open sqlite db")?);
+
+    let server = Arc::new(
+        FaastaServer::new(
+            metadata_db,
+            args.base_domain.clone(),
+            args.functions_path.clone(),
+        )
+        .await?,
+    );
     SERVER
         .set(server.clone())
         .map_err(|_| anyhow::anyhow!("server already initialised"))?;
@@ -204,16 +194,6 @@ async fn run_server(args: ServeArgs) -> Result<()> {
         .serve(router.into_make_service())
         .await
         .context("https server error")
-}
-
-fn ensure_dir(path: &FsPath, label: &str) -> Result<()> {
-    match std::fs::create_dir_all(path) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
-        Err(err) => {
-            Err(err).with_context(|| format!("failed to create {label} directory at {:?}", path))
-        }
-    }
 }
 
 fn build_rpc_runtime(driver: RpcDriver) -> io::Result<compio::runtime::Runtime> {
@@ -356,7 +336,7 @@ async fn function_dispatch(
     };
 
     let Some(function_name) =
-        function_runtime::resolve_function_name(host_ref, uri.path(), &state.server.base_domain)
+        wasi_server::resolve_function_name(host_ref, uri.path(), &state.server.base_domain)
     else {
         return error_response(StatusCode::NOT_FOUND, "Function name missing");
     };
