@@ -14,9 +14,13 @@ struct ProxyResponse {
 }
 
 fn parse_query(uri: &str) -> std::collections::HashMap<String, String> {
-    uri.splitn(2, '?')
-        .nth(1)
-        .map(|query| form_urlencoded::parse(query.as_bytes()).into_owned().collect())
+    uri.split_once('?')
+        .map(|(_, query)| query)
+        .map(|query| {
+            form_urlencoded::parse(query.as_bytes())
+                .into_owned()
+                .collect()
+        })
         .unwrap_or_default()
 }
 

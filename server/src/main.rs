@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use axum::Router;
 use axum::body::{Body, to_bytes};
-use axum::extract::{Host, OriginalUri, Path, State};
+use axum::extract::{OriginalUri, Path, State};
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -318,10 +318,13 @@ async fn publish_handler(
 
 async fn function_dispatch(
     State(state): State<AppState>,
-    host: Option<Host>,
     request: Request<Body>,
 ) -> impl IntoResponse {
-    let host_string = host.map(|Host(host)| host);
+    let host_string = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
     let host_ref = host_string.as_deref();
     let method = request.method().clone();
     let uri = request.uri().clone();

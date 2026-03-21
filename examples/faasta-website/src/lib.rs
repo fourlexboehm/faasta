@@ -1,7 +1,7 @@
 use cap_async_std::fs::Dir;
 use faasta_macros::faasta;
 use faasta_types::{FaastaRequest, FaastaResponse};
-use maud::{html, Markup, DOCTYPE};
+use maud::{DOCTYPE, Markup, html};
 
 #[faasta]
 pub async fn serve_website(request: FaastaRequest, _dir: Dir) -> FaastaResponse {
@@ -141,7 +141,7 @@ fn serve_home_page() -> Markup {
                     a.btn.primary href="/getting-started" { "Get Started Now" }
                 }
             }
-        }
+        },
     )
 }
 
@@ -187,7 +187,7 @@ async fn handler(request: FaastaRequest, dir: Dir) -> FaastaResponse {
                     }
                 }
             }
-        }
+        },
     )
 }
 
@@ -229,7 +229,7 @@ fn serve_getting_started_page() -> Markup {
                     }
                 }
             }
-        }
+        },
     )
 }
 
@@ -244,7 +244,7 @@ fn serve_not_found_page() -> Markup {
                     a.btn.primary href="/" { "Return Home" }
                 }
             }
-        }
+        },
     )
 }
 

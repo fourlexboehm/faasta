@@ -8,7 +8,7 @@ description = "Official website for the Faasta project using native Faasta handl
 crate-type = ["cdylib"]
 
 [dependencies]
-cap-async-std = { version = "3.4.2", features = ["tokio1"] }
+cap-async-std = { version = "3.4.5", features = ["tokio1"] }
 faasta-macros = { path = "../../macros" }
 faasta-types = { path = "../../faasta-types" }
 maud = "0.27"

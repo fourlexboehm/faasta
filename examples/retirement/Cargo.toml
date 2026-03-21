@@ -10,7 +10,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-cap-async-std = { version = "3.4.2", features = ["tokio1"] }
+cap-async-std = { version = "3.4.5", features = ["tokio1"] }
 faasta-macros = { path = "../../macros" }
 faasta-types = { path = "../../faasta-types" }
 serde = { version = "1", features = ["derive"] }

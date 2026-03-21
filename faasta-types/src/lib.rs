@@ -23,11 +23,7 @@ pub struct FaastaResponse {
     pub body: StableVec<u8>,
 }
 
-pub type FaastaFuture = stabby::Dyn<
-    'static,
-    stabby::boxed::Box<()>,
-    stabby::vtable!(stabby::future::Future<Output = FaastaResponse> + Send + Sync),
->;
+pub type FaastaFuture = stabby::future::DynFuture<'static, FaastaResponse>;
 
 impl FaastaResponse {
     pub fn new(status: u16) -> Self {
