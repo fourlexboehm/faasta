@@ -9,5 +9,6 @@ license = "MIT"
 bincode = "2.0.1"
 bitrpc = { version = "0.3", features = ["compio-server"] }
 bitcode = "0.6.9"
+compio-driver = { version = "0.9", features = ["io-uring"] }
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"

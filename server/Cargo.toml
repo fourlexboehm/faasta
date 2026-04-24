@@ -14,6 +14,7 @@ cap-async-std = { version = "3.4.5", features = ["tokio1"] }
 chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
 compio = { version = "0.18.0", features = ["macros", "rustls", "time", "polling"] }
+compio-driver = { version = "0.9", features = ["io-uring"] }
 compio-quic = { version = "0.7.0", features = ["h3"] }
 cyper = { version = "0.8.3", features = ["json", "rustls"] }
 cyper-core = "0.8.0"

@@ -10,8 +10,8 @@ members = [
 exclude = ["function", "**/builds"]
 
 [workspace.dependencies]
-anyhow = "1.0.95"
-serde_json = "1.0.134"
+anyhow = "1.0.102"
+serde_json = "1.0.149"
 
 [workspace.metadata.hackerman]
 lock = true
