@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["FunctionInvoker"],"fn":["build_faasta_request","faasta_response_to_http","resolve_function_name","sanitize_function_name"],"static":["SERVER"],"struct":["FaastaServer"]};

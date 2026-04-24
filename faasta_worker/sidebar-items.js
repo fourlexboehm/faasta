@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["child_main","child_status_message","handle_request","main","next_path","next_string","parse_args","reap_children","run","supervisor_loop"],"mod":["worker_protocol"],"struct":["Args"],"type":["HandleRequestFn"]};
