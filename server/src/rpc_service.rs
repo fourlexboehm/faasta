@@ -1,5 +1,5 @@
 use crate::metrics::get_metrics;
-use crate::wasi_server::{self, SERVER};
+use crate::wasi_server::SERVER;
 use faasta_interface::{FunctionError, FunctionInfo, FunctionResult, FunctionService, Metrics};
 use std::fs;
 use std::io::Write;
@@ -148,27 +148,6 @@ impl FunctionServiceImpl {
         // Atomically rename to final path
         fs::rename(&temp_path, &artifact_path)
             .map_err(|e| FunctionError::InternalError(format!("Failed to commit file: {e}")))?;
-
-        // Validate the library exports the expected symbol upfront so we can surface
-        // errors during publish rather than on first request.
-        let symbol_name = wasi_server::function_symbol_name(&name);
-        unsafe {
-            let library = libloading::Library::new(&artifact_path).map_err(|e| {
-                FunctionError::InvalidInput(format!(
-                    "Uploaded artifact is not a valid shared library: {e}"
-                ))
-            })?;
-            let validation_result: Result<(), FunctionError> = library
-                .get::<libloading::Symbol<*const ()>>(symbol_name.as_bytes())
-                .map(|_| ())
-                .map_err(|e| {
-                    FunctionError::InvalidInput(format!(
-                        "Shared library is missing expected symbol '{symbol_name}': {e}"
-                    ))
-                });
-            drop(library);
-            validation_result?;
-        }
 
         // Create function info with both subdomain and path-based URLs
         let now = chrono::Utc::now().to_rfc3339();

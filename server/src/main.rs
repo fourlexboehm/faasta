@@ -26,18 +26,21 @@ use tracing::{Level, error, info};
 
 mod cert_manager;
 mod db;
+mod function_worker;
 mod github_auth;
+mod in_process_function;
 mod kvm_guest;
 mod metrics;
 mod quic;
 mod rpc_service;
 mod wasi_server;
+mod worker_protocol;
 
 use cert_manager::CertManager;
 use db::Database;
 use metrics::{get_metrics, spawn_periodic_flush};
 use rpc_service::create_service;
-use wasi_server::{FaastaServer, SERVER, sanitize_function_name};
+use wasi_server::{FaastaServer, FunctionInvoker, SERVER, sanitize_function_name};
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "server")]
@@ -75,6 +78,14 @@ struct Args {
     #[arg(long, env = "FUNCTIONS_PATH", default_value = "./functions")]
     functions_path: PathBuf,
 
+    /// Path to the per-function native worker executable.
+    #[arg(long, env = "FAASTA_WORKER_PATH")]
+    worker_path: Option<PathBuf>,
+
+    /// Function execution backend: auto, isolated, or in-process.
+    #[arg(long, env = "FAASTA_FUNCTION_RUNTIME", default_value = "auto")]
+    function_runtime: FunctionRuntime,
+
     /// Address for the RPC server (QUIC)
     #[arg(long, env = "RPC_LISTEN_ADDR", default_value = "0.0.0.0:2443")]
     rpc_listen_addr: String,
@@ -93,6 +104,13 @@ enum RpcDriver {
     Auto,
     Polling,
     IoUring,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum FunctionRuntime {
+    Auto,
+    Isolated,
+    InProcess,
 }
 
 #[derive(Clone)]
@@ -137,12 +155,14 @@ async fn main() -> Result<()> {
     }
 
     let metadata_db = Arc::new(Database::open(&args.db_path).context("failed to open sqlite db")?);
+    let invoker = build_function_invoker(args.function_runtime, &args)?;
 
     let server = Arc::new(
         FaastaServer::new(
             metadata_db,
             args.base_domain.clone(),
             args.functions_path.clone(),
+            invoker,
         )
         .await?,
     );
@@ -194,6 +214,45 @@ async fn main() -> Result<()> {
         .serve(router.into_make_service())
         .await
         .context("https server error")
+}
+
+fn build_function_invoker(runtime: FunctionRuntime, args: &Args) -> Result<FunctionInvoker> {
+    let runtime = match runtime {
+        FunctionRuntime::Auto if cfg!(target_os = "linux") => FunctionRuntime::Isolated,
+        FunctionRuntime::Auto => FunctionRuntime::InProcess,
+        explicit => explicit,
+    };
+
+    match runtime {
+        FunctionRuntime::Auto => unreachable!("auto function runtime should be resolved"),
+        FunctionRuntime::Isolated => {
+            let worker_binary = args
+                .worker_path
+                .clone()
+                .map(Ok)
+                .unwrap_or_else(default_worker_binary)?;
+            Ok(FunctionInvoker::isolated(
+                worker_binary,
+                args.functions_path.join("workers"),
+            ))
+        }
+        FunctionRuntime::InProcess => {
+            if args.worker_path.is_some() {
+                info!("ignoring --worker-path because function runtime is in-process");
+            }
+            Ok(FunctionInvoker::in_process())
+        }
+    }
+}
+
+fn default_worker_binary() -> Result<PathBuf> {
+    let current_exe = std::env::current_exe().context("failed to resolve current executable")?;
+    let worker_name = if cfg!(windows) {
+        "faasta-worker.exe"
+    } else {
+        "faasta-worker"
+    };
+    Ok(current_exe.with_file_name(worker_name))
 }
 
 fn build_rpc_runtime(driver: RpcDriver) -> io::Result<compio::runtime::Runtime> {

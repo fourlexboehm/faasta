@@ -3223,6 +3223,7 @@ dependencies = [
  "hyper 1.7.0",
  "hyper-util",
  "lazy_static",
+ "libc",
  "libloading",
  "once_cell",
  "rusqlite",

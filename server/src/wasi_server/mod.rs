@@ -1,57 +1,23 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result, bail};
 use axum::body::Body;
 use bytes::Bytes;
-use cap_async_std::ambient_authority;
-use cap_async_std::fs::Dir;
-use dashmap::DashMap;
-use faasta_types::{
-    FaastaFuture, FaastaRequest, FaastaResponse, Header,
-    stabby::alloc::{string::String as StableString, vec::Vec as StableVec},
-};
 use http::{HeaderMap, Method, Response, Uri, header::HeaderName, header::HeaderValue};
-use libloading::{Library, Symbol};
 use once_cell::sync::OnceCell;
 use tokio::fs;
 use tracing::debug;
 
 use crate::db::Database;
+use crate::function_worker::WorkerPool;
 use crate::github_auth::GitHubAuth;
+use crate::in_process_function::InProcessFunctionPool;
 use crate::kvm_guest;
 use crate::metrics::Timer;
+use crate::worker_protocol::{WireHeader, WorkerRequest, WorkerResponse};
 
 pub static SERVER: OnceCell<Arc<FaastaServer>> = OnceCell::new();
-
-#[allow(improper_ctypes_definitions)]
-type HandleRequestFn = unsafe extern "C" fn(FaastaRequest, Dir) -> FaastaFuture;
-
-struct LoadedFunction {
-    _library: Arc<Library>,
-    handle_fn: HandleRequestFn,
-    hits: AtomicUsize,
-}
-
-impl LoadedFunction {
-    fn new(library: Arc<Library>, handle_fn: HandleRequestFn) -> Self {
-        Self {
-            _library: library,
-            handle_fn,
-            hits: AtomicUsize::new(0),
-        }
-    }
-
-    fn handle(&self) -> HandleRequestFn {
-        self.hits.fetch_add(1, Ordering::Relaxed);
-        self.handle_fn
-    }
-
-    fn hits(&self) -> usize {
-        self.hits.load(Ordering::Relaxed)
-    }
-}
 
 pub struct FaastaServer {
     pub metadata_db: Arc<Database>,
@@ -59,8 +25,7 @@ pub struct FaastaServer {
     pub functions_dir: PathBuf,
     sandbox_root: PathBuf,
     pub github_auth: GitHubAuth,
-    loaded: DashMap<String, Arc<LoadedFunction>>,
-    max_cached_functions: usize,
+    invoker: FunctionInvoker,
 }
 
 impl FaastaServer {
@@ -68,6 +33,7 @@ impl FaastaServer {
         metadata_db: Arc<Database>,
         base_domain: String,
         functions_dir: PathBuf,
+        invoker: FunctionInvoker,
     ) -> Result<Self> {
         kvm_guest::ensure_linked();
 
@@ -93,17 +59,24 @@ impl FaastaServer {
             functions_dir,
             sandbox_root,
             github_auth,
-            loaded: DashMap::new(),
-            max_cached_functions: 512,
+            invoker,
         })
     }
 
     pub fn artifact_path(&self, function_name: &str) -> PathBuf {
-        self.functions_dir.join(format!("{function_name}.so"))
+        self.artifact_candidates(function_name)
+            .into_iter()
+            .find(|path| path.exists())
+            .unwrap_or_else(|| self.functions_dir.join(format!("{function_name}.so")))
     }
 
-    fn symbol_name(function_name: &str) -> String {
-        function_symbol_name(function_name)
+    fn artifact_candidates(&self, function_name: &str) -> Vec<PathBuf> {
+        let mut candidates = vec![self.functions_dir.join(format!("{function_name}.so"))];
+        if cfg!(target_os = "macos") {
+            candidates.push(self.functions_dir.join(format!("{function_name}.dylib")));
+            candidates.push(self.functions_dir.join(format!("lib{function_name}.dylib")));
+        }
+        candidates
     }
 
     fn ensure_exists(path: &Path) -> Result<()> {
@@ -113,65 +86,17 @@ impl FaastaServer {
         Ok(())
     }
 
-    fn evict_if_needed(&self) {
-        if self.loaded.len() <= self.max_cached_functions {
-            return;
-        }
-
-        if let Some(entry) = self.loaded.iter().min_by_key(|guard| guard.value().hits()) {
-            let key = entry.key().to_string();
-            debug!("evicting cached function {key}");
-            self.loaded.remove(&key);
-        }
-    }
-
-    async fn load_function(&self, function_name: &str) -> Result<Arc<LoadedFunction>> {
-        if let Some(handle) = self.loaded.get(function_name) {
-            return Ok(handle.clone());
-        }
-
-        let artifact_path = self.artifact_path(function_name);
-        Self::ensure_exists(&artifact_path)?;
-
-        // Safety: the library is trusted to export the expected symbol.
-        let library = unsafe {
-            Library::new(&artifact_path)
-                .with_context(|| format!("failed to load library {}", artifact_path.display()))?
-        };
-        let library = Arc::new(library);
-        let symbol_name = Self::symbol_name(function_name);
-
-        let symbol: Symbol<HandleRequestFn> = unsafe {
-            library.get(symbol_name.as_bytes()).with_context(|| {
-                format!(
-                    "function symbol '{symbol_name}' missing in {}",
-                    artifact_path.display()
-                )
-            })?
-        };
-        let handle_fn = *symbol;
-
-        let loaded = Arc::new(LoadedFunction::new(library.clone(), handle_fn));
-        self.loaded
-            .insert(function_name.to_string(), loaded.clone());
-        self.evict_if_needed();
-        Ok(loaded)
-    }
-
-    pub async fn prepare_sandbox(&self, function_name: &str) -> Result<Dir> {
+    pub async fn prepare_sandbox_path(&self, function_name: &str) -> Result<PathBuf> {
         let sandbox_path = self.sandbox_root.join(function_name);
         fs::create_dir_all(&sandbox_path)
             .await
             .with_context(|| format!("failed to prepare sandbox for {function_name}"))?;
-
-        Dir::open_ambient_dir(&sandbox_path, ambient_authority())
-            .await
-            .with_context(|| format!("failed to open sandbox dir {}", sandbox_path.display()))
+        Ok(sandbox_path)
     }
 
     pub async fn remove_from_cache(&self, function_name: &str) {
-        self.loaded.remove(function_name);
-        debug!("removed cached function {function_name}");
+        self.invoker.remove(function_name);
+        debug!("removed cached function runtime state {function_name}");
     }
 
     pub async fn invoke(
@@ -182,20 +107,21 @@ impl FaastaServer {
         headers: HeaderMap,
         body: Bytes,
     ) -> Result<Response<Body>> {
-        let handle = self
-            .load_function(function_name)
-            .await
-            .with_context(|| format!("failed to load function '{function_name}'"))?;
+        let artifact_path = self.artifact_path(function_name);
+        Self::ensure_exists(&artifact_path)?;
 
-        let sandbox = self
-            .prepare_sandbox(function_name)
+        let sandbox_path = self
+            .prepare_sandbox_path(function_name)
             .await
             .with_context(|| format!("failed to prepare sandbox for '{function_name}'"))?;
 
         let _timer = Timer::new(function_name.to_string());
         let request = build_faasta_request(method, uri, headers, body);
-        let future = unsafe { (handle.handle())(request, sandbox) };
-        let response = future.await;
+        let response = self
+            .invoker
+            .invoke(function_name, &artifact_path, &sandbox_path, request)
+            .await
+            .with_context(|| format!("worker failed for function '{function_name}'"))?;
         Ok(faasta_response_to_http(response))
     }
 
@@ -204,12 +130,53 @@ impl FaastaServer {
     }
 }
 
+pub enum FunctionInvoker {
+    Isolated(WorkerPool),
+    InProcess(InProcessFunctionPool),
+}
+
+impl FunctionInvoker {
+    pub fn isolated(worker_binary: PathBuf, worker_dir: PathBuf) -> Self {
+        Self::Isolated(WorkerPool::new(worker_binary, worker_dir))
+    }
+
+    pub fn in_process() -> Self {
+        Self::InProcess(InProcessFunctionPool::new())
+    }
+
+    async fn invoke(
+        &self,
+        function_name: &str,
+        artifact_path: &Path,
+        sandbox_path: &Path,
+        request: WorkerRequest,
+    ) -> Result<WorkerResponse> {
+        match self {
+            Self::Isolated(pool) => {
+                pool.invoke(function_name, artifact_path, sandbox_path, request)
+                    .await
+            }
+            Self::InProcess(pool) => {
+                pool.invoke(function_name, artifact_path, sandbox_path, request)
+                    .await
+            }
+        }
+    }
+
+    fn remove(&self, function_name: &str) {
+        match self {
+            Self::Isolated(pool) => pool.remove(function_name),
+            Self::InProcess(pool) => pool.remove(function_name),
+        }
+    }
+}
+
 fn build_faasta_request(
     method: Method,
     uri: Uri,
     headers: HeaderMap,
     body: Bytes,
-) -> FaastaRequest {
+) -> WorkerRequest {
     let method_code = match method {
         Method::GET => 0,
         Method::POST => 1,
@@ -221,38 +188,34 @@ fn build_faasta_request(
         _ => 0,
     };
 
-    let mut header_vec: StableVec<Header> = StableVec::new();
+    let mut header_vec = Vec::new();
     for (name, value) in headers.iter() {
-        let stable_name = StableString::from(name.as_str());
-        let stable_value = StableString::from(value.to_str().unwrap_or(""));
-        header_vec.push(Header {
-            name: stable_name,
-            value: stable_value,
+        header_vec.push(WireHeader {
+            name: name.as_str().to_string(),
+            value: value.to_str().unwrap_or("").to_string(),
         });
     }
 
-    let stable_body: StableVec<u8> = body.into_iter().collect();
     let uri_string = uri.to_string();
 
-    FaastaRequest {
+    WorkerRequest {
         method: method_code,
-        uri: StableString::from(uri_string.as_str()),
+        uri: uri_string,
         headers: header_vec,
-        body: stable_body,
+        body: body.to_vec(),
     }
 }
 
-fn faasta_response_to_http(resp: FaastaResponse) -> Response<Body> {
-    let body_bytes: Vec<u8> = resp.body.iter().copied().collect();
+fn faasta_response_to_http(resp: WorkerResponse) -> Response<Body> {
     let mut response = Response::builder()
         .status(resp.status)
-        .body(Body::from(body_bytes))
+        .body(Body::from(resp.body))
         .unwrap_or_else(|_| Response::builder().status(500).body(Body::empty()).unwrap());
 
     let headers_mut = response.headers_mut();
-    for header in resp.headers.iter() {
+    for header in resp.headers {
         if let (Ok(name), Ok(val)) = (
-            HeaderName::from_bytes(header.name.as_str().as_bytes()),
+            HeaderName::from_bytes(header.name.as_bytes()),
             HeaderValue::from_str(header.value.as_str()),
         ) {
             headers_mut.append(name, val);
@@ -293,9 +256,4 @@ pub fn sanitize_function_name(function_name: &str) -> Option<String> {
     } else {
         None
     }
-}
-
-pub fn function_symbol_name(function_name: &str) -> String {
-    let sanitized = function_name.replace('-', "_");
-    format!("dy_{sanitized}")
 }
