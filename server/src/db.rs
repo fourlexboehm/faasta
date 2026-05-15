@@ -90,7 +90,16 @@ impl Database {
         conn.query_row(
             "SELECT total_time, call_count, last_called FROM metrics WHERE function_name = ?1",
             params![function_name],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| {
+                let total_time: i64 = row.get(0)?;
+                let call_count: i64 = row.get(1)?;
+                let last_called: i64 = row.get(2)?;
+                Ok((
+                    total_time.max(0) as u64,
+                    call_count.max(0) as u64,
+                    last_called.max(0) as u64,
+                ))
+            },
         )
         .optional()
         .map_err(Into::into)
@@ -111,7 +120,12 @@ impl Database {
                 total_time = excluded.total_time,
                 call_count = excluded.call_count,
                 last_called = excluded.last_called",
-            params![function_name, total_time, call_count, last_called],
+            params![
+                function_name,
+                total_time as i64,
+                call_count as i64,
+                last_called as i64
+            ],
         )?;
         Ok(())
     }
@@ -131,7 +145,16 @@ impl Database {
         let mut stmt =
             conn.prepare("SELECT function_name, total_time, call_count, last_called FROM metrics")?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            let function_name: String = row.get(0)?;
+            let total_time: i64 = row.get(1)?;
+            let call_count: i64 = row.get(2)?;
+            let last_called: i64 = row.get(3)?;
+            Ok((
+                function_name,
+                total_time.max(0) as u64,
+                call_count.max(0) as u64,
+                last_called.max(0) as u64,
+            ))
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()
             .map_err(Into::into)

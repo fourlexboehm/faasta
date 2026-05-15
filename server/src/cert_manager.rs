@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use cyper::Client as HttpClient;
+use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -168,15 +168,10 @@ impl CertManager {
 
         info!("Sending request to Porkbun API for domain: {}", self.domain);
 
-        let request = self
+        let response = self
             .client
             .post(&url)
-            .context("Failed to create Porkbun request")?;
-        let request = request
             .json(&request_body)
-            .context("Failed to serialize Porkbun request body")?;
-
-        let response = request
             .send()
             .await
             .context("Failed to send request to Porkbun API")?;

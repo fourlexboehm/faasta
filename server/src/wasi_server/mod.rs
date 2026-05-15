@@ -6,16 +6,12 @@ use axum::body::Body;
 use bytes::Bytes;
 use http::{HeaderMap, Method, Response, Uri, header::HeaderName, header::HeaderValue};
 use once_cell::sync::OnceCell;
-use tokio::fs;
 use tracing::debug;
 
 use crate::db::Database;
-use crate::function_worker::WorkerPool;
 use crate::github_auth::GitHubAuth;
-use crate::in_process_function::InProcessFunctionPool;
-use crate::kvm_guest;
 use crate::metrics::Timer;
-use crate::worker_protocol::{WireHeader, WorkerRequest, WorkerResponse};
+use crate::wasm_function::{WasmFunctionRuntime, WasmRequest, WasmResponse, WireHeader};
 
 pub static SERVER: OnceCell<Arc<FaastaServer>> = OnceCell::new();
 
@@ -35,10 +31,8 @@ impl FaastaServer {
         functions_dir: PathBuf,
         invoker: FunctionInvoker,
     ) -> Result<Self> {
-        kvm_guest::ensure_linked();
-
         if !functions_dir.exists() {
-            fs::create_dir_all(&functions_dir).await.with_context(|| {
+            std::fs::create_dir_all(&functions_dir).with_context(|| {
                 format!(
                     "failed to create functions directory at {:?}",
                     functions_dir
@@ -47,8 +41,7 @@ impl FaastaServer {
         }
 
         let sandbox_root = functions_dir.join("sandbox");
-        fs::create_dir_all(&sandbox_root)
-            .await
+        std::fs::create_dir_all(&sandbox_root)
             .with_context(|| format!("failed to create sandbox directory at {:?}", sandbox_root))?;
 
         let github_auth = GitHubAuth::new(metadata_db.clone()).await?;
@@ -67,11 +60,15 @@ impl FaastaServer {
         self.artifact_candidates(function_name)
             .into_iter()
             .find(|path| path.exists())
-            .unwrap_or_else(|| self.functions_dir.join(format!("{function_name}.so")))
+            .unwrap_or_else(|| self.functions_dir.join(format!("{function_name}.wasm")))
     }
 
     fn artifact_candidates(&self, function_name: &str) -> Vec<PathBuf> {
-        let mut candidates = vec![self.functions_dir.join(format!("{function_name}.so"))];
+        let mut candidates = vec![
+            self.functions_dir.join(format!("{function_name}.wasm")),
+            self.functions_dir.join(format!("{function_name}.cwasm")),
+            self.functions_dir.join(format!("{function_name}.so")),
+        ];
         if cfg!(target_os = "macos") {
             candidates.push(self.functions_dir.join(format!("{function_name}.dylib")));
             candidates.push(self.functions_dir.join(format!("lib{function_name}.dylib")));
@@ -88,8 +85,7 @@ impl FaastaServer {
 
     pub async fn prepare_sandbox_path(&self, function_name: &str) -> Result<PathBuf> {
         let sandbox_path = self.sandbox_root.join(function_name);
-        fs::create_dir_all(&sandbox_path)
-            .await
+        std::fs::create_dir_all(&sandbox_path)
             .with_context(|| format!("failed to prepare sandbox for {function_name}"))?;
         Ok(sandbox_path)
     }
@@ -110,7 +106,7 @@ impl FaastaServer {
         let artifact_path = self.artifact_path(function_name);
         Self::ensure_exists(&artifact_path)?;
 
-        let sandbox_path = self
+        let _sandbox_path = self
             .prepare_sandbox_path(function_name)
             .await
             .with_context(|| format!("failed to prepare sandbox for '{function_name}'"))?;
@@ -119,7 +115,7 @@ impl FaastaServer {
         let request = build_faasta_request(method, uri, headers, body);
         let response = self
             .invoker
-            .invoke(function_name, &artifact_path, &sandbox_path, request)
+            .invoke(function_name, &artifact_path, request)
             .await
             .with_context(|| format!("worker failed for function '{function_name}'"))?;
         Ok(faasta_response_to_http(response))
@@ -130,53 +126,34 @@ impl FaastaServer {
     }
 }
 
-pub enum FunctionInvoker {
-    Isolated(WorkerPool),
-    InProcess(InProcessFunctionPool),
+pub struct FunctionInvoker {
+    runtime: WasmFunctionRuntime,
 }
 
 impl FunctionInvoker {
-    pub fn isolated(worker_binary: PathBuf, worker_dir: PathBuf) -> Self {
-        Self::Isolated(WorkerPool::new(worker_binary, worker_dir))
-    }
-
-    pub fn in_process() -> Self {
-        Self::InProcess(InProcessFunctionPool::new())
+    pub async fn wasm() -> Result<Self> {
+        Ok(Self {
+            runtime: WasmFunctionRuntime::new().await?,
+        })
     }
 
     async fn invoke(
         &self,
         function_name: &str,
         artifact_path: &Path,
-        sandbox_path: &Path,
-        request: WorkerRequest,
-    ) -> Result<WorkerResponse> {
-        match self {
-            Self::Isolated(pool) => {
-                pool.invoke(function_name, artifact_path, sandbox_path, request)
-                    .await
-            }
-            Self::InProcess(pool) => {
-                pool.invoke(function_name, artifact_path, sandbox_path, request)
-                    .await
-            }
-        }
+        request: WasmRequest,
+    ) -> Result<WasmResponse> {
+        self.runtime
+            .invoke(function_name, artifact_path, request)
+            .await
     }
 
     fn remove(&self, function_name: &str) {
-        match self {
-            Self::Isolated(pool) => pool.remove(function_name),
-            Self::InProcess(pool) => pool.remove(function_name),
-        }
+        self.runtime.remove(function_name);
     }
 }
 
-fn build_faasta_request(
-    method: Method,
-    uri: Uri,
-    headers: HeaderMap,
-    body: Bytes,
-) -> WorkerRequest {
+fn build_faasta_request(method: Method, uri: Uri, headers: HeaderMap, body: Bytes) -> WasmRequest {
     let method_code = match method {
         Method::GET => 0,
         Method::POST => 1,
@@ -198,7 +175,7 @@ fn build_faasta_request(
 
     let uri_string = uri.to_string();
 
-    WorkerRequest {
+    WasmRequest {
         method: method_code,
         uri: uri_string,
         headers: header_vec,
@@ -206,7 +183,7 @@ fn build_faasta_request(
     }
 }
 
-fn faasta_response_to_http(resp: WorkerResponse) -> Response<Body> {
+fn faasta_response_to_http(resp: WasmResponse) -> Response<Body> {
     let mut response = Response::builder()
         .status(resp.status)
         .body(Body::from(resp.body))

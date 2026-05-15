@@ -66,8 +66,8 @@ impl FunctionServiceImpl {
             )));
         }
 
-        // Expect a pre-built native shared object for the function
-        let artifact_filename = format!("{name}.so");
+        // Expect a pre-built WASI HTTP component for the function.
+        let artifact_filename = format!("{name}.wasm");
         let artifact_path = server.functions_dir.join(&artifact_filename);
 
         // Check if function already exists
@@ -132,7 +132,7 @@ impl FunctionServiceImpl {
         }
 
         // Create a temporary file path to avoid race conditions
-        let temp_path = artifact_path.with_extension("so.tmp");
+        let temp_path = artifact_path.with_extension("wasm.tmp");
 
         // Write to temporary path first
         let mut file = fs::File::create(&temp_path).map_err(|e| {
@@ -274,14 +274,18 @@ impl FunctionServiceImpl {
                 ));
             }
 
-            // Remove the shared object for the function
-            let artifact_filename = format!("{name}.so");
-            let artifact_path = server.functions_dir.join(artifact_filename);
-            if artifact_path.exists() {
-                if let Err(e) = fs::remove_file(&artifact_path) {
-                    error!("Failed to remove shared object: {e}");
-                } else {
-                    debug!("Successfully removed shared object for function '{name}'");
+            // Remove known artifact formats for the function.
+            for extension in ["wasm", "cwasm", "so", "dylib"] {
+                let artifact_path = server.functions_dir.join(format!("{name}.{extension}"));
+                if artifact_path.exists() {
+                    if let Err(e) = fs::remove_file(&artifact_path) {
+                        error!("Failed to remove artifact {}: {e}", artifact_path.display());
+                    } else {
+                        debug!(
+                            "Successfully removed artifact {} for function '{name}'",
+                            artifact_path.display()
+                        );
+                    }
                 }
             }
 

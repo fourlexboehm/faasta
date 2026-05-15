@@ -8,13 +8,12 @@ use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum_server::tls_rustls::RustlsConfig;
+use bitrpc::tokio as bitrpc_tokio;
 use clap::Parser;
-use compio::driver::{DriverType, ProactorBuilder};
-use compio::runtime::RuntimeBuilder;
 use faasta_interface::FunctionError;
+use faasta_interface::RpcRequestServiceWrapper;
 use serde::Serialize;
 use serde_json::json;
-use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,15 +25,11 @@ use tracing::{Level, error, info};
 
 mod cert_manager;
 mod db;
-mod function_worker;
 mod github_auth;
-mod in_process_function;
-mod kvm_guest;
 mod metrics;
-mod quic;
 mod rpc_service;
 mod wasi_server;
-mod worker_protocol;
+mod wasm_function;
 
 use cert_manager::CertManager;
 use db::Database;
@@ -78,21 +73,13 @@ struct Args {
     #[arg(long, env = "FUNCTIONS_PATH", default_value = "./functions")]
     functions_path: PathBuf,
 
-    /// Path to the per-function native worker executable.
-    #[arg(long, env = "FAASTA_WORKER_PATH")]
-    worker_path: Option<PathBuf>,
-
-    /// Function execution backend: auto, isolated, or in-process.
+    /// Function execution backend.
     #[arg(long, env = "FAASTA_FUNCTION_RUNTIME", default_value = "auto")]
     function_runtime: FunctionRuntime,
 
     /// Address for the RPC server (QUIC)
-    #[arg(long, env = "RPC_LISTEN_ADDR", default_value = "0.0.0.0:2443")]
-    rpc_listen_addr: String,
-
-    /// Driver backend for the QUIC RPC runtime: polling (fork-safe), io-uring, or auto.
-    #[arg(long, env = "RPC_DRIVER", default_value = "polling")]
-    rpc_driver: RpcDriver,
+    #[arg(long, env = "RPC_PATH", default_value = "/rpc")]
+    rpc_path: String,
 
     /// Auto-generate TLS certificate using Porkbun
     #[arg(long, env = "AUTO_CERT", default_value = "false")]
@@ -100,17 +87,9 @@ struct Args {
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
-enum RpcDriver {
-    Auto,
-    Polling,
-    IoUring,
-}
-
-#[derive(clap::ValueEnum, Clone, Copy, Debug)]
 enum FunctionRuntime {
     Auto,
-    Isolated,
-    InProcess,
+    Wasm,
 }
 
 #[derive(Clone)]
@@ -155,7 +134,7 @@ async fn main() -> Result<()> {
     }
 
     let metadata_db = Arc::new(Database::open(&args.db_path).context("failed to open sqlite db")?);
-    let invoker = build_function_invoker(args.function_runtime, &args)?;
+    let invoker = build_function_invoker(args.function_runtime).await?;
 
     let server = Arc::new(
         FaastaServer::new(
@@ -179,7 +158,8 @@ async fn main() -> Result<()> {
     let router = Router::new()
         .route("/healthz", get(health_handler))
         .route("/v1/metrics", get(metrics_handler))
-        .route("/v1/publish/:function_name", post(publish_handler))
+        .route(&args.rpc_path, post(rpc_handler))
+        .route("/v1/publish/{function_name}", post(publish_handler))
         .fallback(function_dispatch)
         .with_state(app_state)
         .layer(
@@ -196,19 +176,6 @@ async fn main() -> Result<()> {
     let redirect_domain = args.base_domain.clone();
     tokio::spawn(run_http_redirect(args.http_listen_addr, redirect_domain));
 
-    let rpc_cert = args.tls_cert_path.clone();
-    let rpc_key = args.tls_key_path.clone();
-    let rpc_addr = args.rpc_listen_addr.clone();
-    let rpc_driver = args.rpc_driver;
-    tokio::task::spawn_blocking(move || match build_rpc_runtime(rpc_driver) {
-        Ok(runtime) => {
-            if let Err(err) = runtime.block_on(quic::run_rpc_server(rpc_cert, rpc_key, rpc_addr)) {
-                error!("rpc server exited with error: {err}");
-            }
-        }
-        Err(err) => error!("failed to start compio runtime for rpc server: {err}"),
-    });
-
     info!("HTTPS server listening on {}", args.listen_addr);
     axum_server::bind_rustls(args.listen_addr, rustls_config)
         .serve(router.into_make_service())
@@ -216,60 +183,16 @@ async fn main() -> Result<()> {
         .context("https server error")
 }
 
-fn build_function_invoker(runtime: FunctionRuntime, args: &Args) -> Result<FunctionInvoker> {
+async fn build_function_invoker(runtime: FunctionRuntime) -> Result<FunctionInvoker> {
     let runtime = match runtime {
-        FunctionRuntime::Auto if cfg!(target_os = "linux") => FunctionRuntime::Isolated,
-        FunctionRuntime::Auto => FunctionRuntime::InProcess,
+        FunctionRuntime::Auto => FunctionRuntime::Wasm,
         explicit => explicit,
     };
 
     match runtime {
         FunctionRuntime::Auto => unreachable!("auto function runtime should be resolved"),
-        FunctionRuntime::Isolated => {
-            let worker_binary = args
-                .worker_path
-                .clone()
-                .map(Ok)
-                .unwrap_or_else(default_worker_binary)?;
-            Ok(FunctionInvoker::isolated(
-                worker_binary,
-                args.functions_path.join("workers"),
-            ))
-        }
-        FunctionRuntime::InProcess => {
-            if args.worker_path.is_some() {
-                info!("ignoring --worker-path because function runtime is in-process");
-            }
-            Ok(FunctionInvoker::in_process())
-        }
+        FunctionRuntime::Wasm => FunctionInvoker::wasm().await,
     }
-}
-
-fn default_worker_binary() -> Result<PathBuf> {
-    let current_exe = std::env::current_exe().context("failed to resolve current executable")?;
-    let worker_name = if cfg!(windows) {
-        "faasta-worker.exe"
-    } else {
-        "faasta-worker"
-    };
-    Ok(current_exe.with_file_name(worker_name))
-}
-
-fn build_rpc_runtime(driver: RpcDriver) -> io::Result<compio::runtime::Runtime> {
-    let mut proactor_builder = ProactorBuilder::new();
-    match driver {
-        RpcDriver::Auto => {}
-        RpcDriver::Polling => {
-            proactor_builder.driver_type(DriverType::Poll);
-        }
-        RpcDriver::IoUring => {
-            proactor_builder.driver_type(DriverType::IoUring);
-        }
-    }
-
-    let mut runtime_builder = RuntimeBuilder::new();
-    runtime_builder.with_proactor(proactor_builder);
-    runtime_builder.build()
 }
 
 async fn run_http_redirect(addr: SocketAddr, target_domain: String) {
@@ -311,6 +234,36 @@ async fn health_handler() -> impl IntoResponse {
 
 async fn metrics_handler() -> impl IntoResponse {
     json_response(StatusCode::OK, get_metrics())
+}
+
+async fn rpc_handler(request: Request<Body>) -> impl IntoResponse {
+    let body_bytes = match to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            error!("failed to read RPC body: {err}");
+            return error_response(StatusCode::BAD_REQUEST, "Failed to read request body");
+        }
+    };
+
+    let service = match create_service() {
+        Ok(service) => RpcRequestServiceWrapper(service),
+        Err(err) => {
+            error!("failed to create RPC service: {err}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+        }
+    };
+
+    match bitrpc_tokio::dispatch_bytes(&service, &body_bytes).await {
+        Ok(bytes) => {
+            let response = bitrpc_tokio::response_from_bytes(bytes);
+            let (parts, body) = response.into_parts();
+            Response::from_parts(parts, Body::from(body))
+        }
+        Err(err) => {
+            error!("RPC dispatch failed: {err}");
+            error_response(StatusCode::BAD_REQUEST, "Invalid RPC request")
+        }
+    }
 }
 
 async fn publish_handler(
@@ -418,7 +371,7 @@ async fn function_dispatch(
     {
         Ok(response) => response,
         Err(err) => {
-            error!("function invocation failed: {err}");
+            error!("function invocation failed: {err:?}");
             error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Function invocation failed",

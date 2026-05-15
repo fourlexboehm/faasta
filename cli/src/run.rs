@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use bitrpc::{RpcError, cyper::CyperTransport};
+use bitrpc::{RpcError, tokio::TokioHttpTransport};
 use faasta_interface::{FunctionResult, FunctionServiceRpcClient};
 use std::io;
 use std::path::{Path as StdPath, PathBuf};
@@ -26,8 +26,8 @@ impl FunctionServiceClient {
         Self { endpoint }
     }
 
-    fn new_transport(&self) -> CyperTransport {
-        CyperTransport::new(self.endpoint.clone())
+    fn new_transport(&self) -> TokioHttpTransport {
+        TokioHttpTransport::new(self.endpoint.clone())
     }
 
     pub async fn publish(

@@ -1,0 +1,21 @@
+[workspace]
+
+[package]
+name = "faasta-wasi-capabilities"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+omnia-sdk = "0.31.0"
+omnia-wasi-sql = "0.31.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wasip3 = "0.5.0"
+
+[profile.release]
+lto = true
+strip = "symbols"

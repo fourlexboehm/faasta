@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bincode::{Decode, Encode};
-use cyper::Client as HttpClient;
 use dashmap::DashMap;
+use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -52,32 +52,13 @@ impl GitHubAuth {
                 (None, token.strip_prefix("Bearer ").unwrap_or(token).trim())
             };
 
-        // Build request to GitHub API using compio-native HTTP client
-        let request = match HttpClient::new().get("https://api.github.com/user") {
-            Ok(builder) => builder,
-            Err(err) => {
-                tracing::error!("Failed to create GitHub request builder: {}", err);
-                return Ok(("".to_string(), false));
-            }
-        };
-
-        let request = match request.header("User-Agent", USER_AGENT) {
-            Ok(builder) => builder,
-            Err(err) => {
-                tracing::error!("Failed to set GitHub User-Agent header: {}", err);
-                return Ok(("".to_string(), false));
-            }
-        };
-
-        let request = match request.header("Authorization", format!("Bearer {token_value}")) {
-            Ok(builder) => builder,
-            Err(err) => {
-                tracing::error!("Failed to set GitHub Authorization header: {}", err);
-                return Ok(("".to_string(), false));
-            }
-        };
-
-        let response = match request.send().await {
+        let response = match HttpClient::new()
+            .get("https://api.github.com/user")
+            .header("User-Agent", USER_AGENT)
+            .header("Authorization", format!("Bearer {token_value}"))
+            .send()
+            .await
+        {
             Ok(resp) => resp,
             Err(err) => {
                 tracing::error!("GitHub API request failed: {}", err);
