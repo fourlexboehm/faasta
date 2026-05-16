@@ -35,7 +35,7 @@ jobs:
       
       - name: Prepare artifacts
         run: |
-          cp target/release/server target/artifacts/faasta-server-linux-x86_64
+          cp target/release/faasta-server target/artifacts/faasta-server-linux-x86_64
           cp target/release/cargo-faasta target/artifacts/cargo-faasta-linux-x86_64
       
       - name: Upload Linux artifacts
@@ -69,7 +69,7 @@ jobs:
       
       - name: Prepare artifacts
         run: |
-          cp target/release/server target/artifacts/faasta-server-macos-x86_64
+          cp target/release/faasta-server target/artifacts/faasta-server-macos-x86_64
           cp target/release/cargo-faasta target/artifacts/cargo-faasta-macos-x86_64
       
       - name: Upload macOS artifacts
@@ -103,7 +103,7 @@ jobs:
       
       - name: Prepare artifacts
         run: |
-          cp target/release/server target/artifacts/faasta-server-macos-arm64
+          cp target/release/faasta-server target/artifacts/faasta-server-macos-arm64
           cp target/release/cargo-faasta target/artifacts/cargo-faasta-macos-arm64
       
       - name: Upload macOS ARM artifacts

@@ -56,7 +56,7 @@ jobs:
           FROM debian:bookworm-slim
           WORKDIR /app
           RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
-          COPY --from=builder /app/target/release/server /app/server
+          COPY --from=builder /app/target/release/faasta-server /app/server
           EXPOSE 8080
           EXPOSE 9090
           VOLUME ["/app/data"]

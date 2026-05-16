@@ -44,7 +44,7 @@ jobs:
       
       - name: Prepare artifacts
         run: |
-          cp target/${{ matrix.target }}/release/server${{ matrix.extension || '' }} target/artifacts/${{ matrix.artifact_prefix }}-server${{ matrix.extension || '' }}
+          cp target/${{ matrix.target }}/release/faasta-server${{ matrix.extension || '' }} target/artifacts/${{ matrix.artifact_prefix }}-server${{ matrix.extension || '' }}
           cp target/${{ matrix.target }}/release/cargo-faasta${{ matrix.extension || '' }} target/artifacts/${{ matrix.artifact_prefix }}-cli${{ matrix.extension || '' }}
         shell: bash
       
