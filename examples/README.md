@@ -14,7 +14,7 @@ The [wasi-html](./wasi-html) directory contains an HTML page returned from an as
 
 ### Faasta Website
 
-The [faasta-website](./faasta-website) directory contains the current documentation/marketing site as a WASIp3 Faasta component.
+The [faasta-website](./faasta-website) directory contains the Faasta documentation and product site as a WASIp3 Faasta component.
 
 ## Running the Examples
 

@@ -1,6 +1,6 @@
 # Faasta Website
 
-This example is the current Faasta documentation/marketing site as a WASIp3-facing Faasta component.
+This example is the Faasta documentation and product site as a WASIp3-facing Faasta component.
 
 The copy describes Faasta as using wasi-cloud-core as the standards basis for host-provided SQL, KV, and blob capabilities.
 
