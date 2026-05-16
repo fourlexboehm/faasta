@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"struct":["InProcessFunctionPool","LoadedFunction"],"type":["HandleRequestFn"]};

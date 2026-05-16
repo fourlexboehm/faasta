@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"mod":["prelude"],"struct":["FaastaRequest","FaastaResponse","Header","OptimizedLayoutForFaastaRequest","OptimizedLayoutForFaastaResponse","OptimizedLayoutForHeader"],"type":["FaastaFuture"]};

@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["REQUEST_TIMEOUT","REQUEST_WAIT_TIMEOUT","WORKER_READY_TIMEOUT"],"struct":["InvocationError","WorkerHandle","WorkerPool"]};

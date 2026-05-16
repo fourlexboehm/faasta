@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["DataType"],"fn":["exec","query"],"struct":["Field","Row","Sql"],"trait":["IntoSqlParams","IntoSqlValue"]};

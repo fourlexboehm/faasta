@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["container_exists","create_container","delete","get","list","put"],"struct":["Blobs","Container"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["body_response"],"struct":["Html","Json","ResponseWithStatus"],"trait":["IntoResponse"]};

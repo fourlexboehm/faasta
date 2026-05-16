@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["delete","get","set"],"struct":["Bucket","Kv"]};
