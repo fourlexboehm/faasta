@@ -2,10 +2,10 @@
 resolver = "2"
 members = [
     "cli",
+    "faasta",
     "interface",
     "server",
-    "macros",
-    "faasta-types"
+    "macros"
 ]
 exclude = ["function", "**/builds"]
 

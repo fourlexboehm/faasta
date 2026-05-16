@@ -1,68 +1,36 @@
-# Faasta: a Faster FaaS Platform
+# Faasta
 
-Faasta is a cutting-edge Function-as-a-Service (FaaS) platform designed for exceptional speed and efficiency. With **cold start times under 1ms** and a **memory overhead of less than 1KB**, Faasta runs native Linux shared libraries under strong per-request isolation.
+Faasta is a Function-as-a-Service platform for Rust functions compiled as WASI HTTP components.
 
 ## Key Features
 
-- Builds your Rust handlers into **native x86_64 Linux shared libraries** (`.so`)
-- Uses the `#[faasta]` macro and strongly typed request/response primitives
-- Provides **secure per-request isolation** with [kvmserver](./kvmserver/README.md)
-- Achieves **ultra-fast cold starts** without the overhead of traditional containerization
-- **Self-hostable** with simple setup - run your own Faasta instance anywhere
-- Powered by **KVM + TinyKVM** for fast reset and isolation
-- Includes a **free hosted instance** at [faasta.lol](https://faasta.lol)
+- Build Rust handlers as WASIp3-facing `wasi:http/service` components
+- Use one application dependency: `faasta`
+- Return JSON or HTML with `faasta::http::{Json, Html}`
+- Inject SQL, KV, and blob storage with `Sql`, `Kv`, and `Blobs`
+- Run components in-process with Wasmtime
+- Self-host with Postgres, Garage/S3, and Valkey for distributed storage
 
----
+## Example
 
-## Getting Started
+```rust
+use faasta::http::Html;
 
-Install the Faasta CLI:
-```bash
-cargo install cargo-faasta
+#[faasta::handler]
+async fn handle() -> faasta::Result<Html<String>> {
+    Ok(Html("<h1>Hello from Faasta</h1>".to_string()))
+}
 ```
 
-Create a new Faasta project:
+## Workflow
+
 ```bash
-cargo faasta init
-# or
 cargo faasta new my-function
-```
-
-Build your function:
-```bash
+cd my-function
 cargo faasta build
-```
-
-Login with your GitHub account:
-```bash
-cargo faasta login
-```
-
-Deploy your function:
-```bash
 cargo faasta deploy
 ```
 
-Your function will be available at `https://your-function-name.faasta.lol`
+`cargo faasta build` wraps the WASIp3 component build so application projects do not need to know the Rust target or artifact layout.
 
-## Runtime Model (KVM Server)
-
-Faasta runs functions as native Linux code and isolates requests using `kvmserver`:
-
-- The CLI builds a `.so` artifact (`x86_64-unknown-linux-gnu`)
-- The server launches functions through `kvmserver`
-- `kvmserver` uses TinyKVM snapshots for fast request isolation and reset
-
-For self-hosting, see:
-- [KVM server docs](./kvmserver/README.md)
-- [Faasta server setup](./server/README.md)
-
-## Self-Hosting
-
-Faasta is fully self-hostable. The provided systemd setup runs:
-
-- `/opt/faasta/faasta-server` (control plane / routing)
-- `/opt/faasta/kvmserver` (request execution runtime)
-
-⚠️ Experimental Status
-Faasta is currently experimental. There will be breaking changes that will interupt service on the faasta.lol instance.
+For self-hosting and storage configuration, see [server/README.md](./server/README.md) and [server/infra/capabilities.md](./server/infra/capabilities.md).

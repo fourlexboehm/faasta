@@ -274,8 +274,8 @@ impl FunctionServiceImpl {
                 ));
             }
 
-            // Remove known artifact formats for the function.
-            for extension in ["wasm", "cwasm", "so", "dylib"] {
+            // Remove known WASI component artifact formats for the function.
+            for extension in ["wasm", "cwasm"] {
                 let artifact_path = server.functions_dir.join(format!("{name}.{extension}"));
                 if artifact_path.exists() {
                     if let Err(e) = fs::remove_file(&artifact_path) {

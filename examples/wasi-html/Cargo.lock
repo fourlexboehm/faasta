@@ -692,11 +692,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "faasta-wasi-capabilities"
+name = "faasta-wasi-html"
 version = "0.1.0"
 dependencies = [
  "faasta",
- "serde",
 ]
 
 [[package]]

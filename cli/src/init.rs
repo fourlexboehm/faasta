@@ -37,7 +37,7 @@ pub fn handle_new(args: &NewArgs) -> Result<(), Box<dyn Error>> {
     write_files(&new_project_dir, HTTP_CARGO_TOML, HTTP_LIB_RS, pkg_name)?;
 
     println!(
-        "Successfully created new Axum project '{}' at '{}'",
+        "Successfully created new Faasta WASI project '{}' at '{}'",
         args.package_name,
         new_project_dir.display()
     );

@@ -39,7 +39,7 @@ use wasi_server::{FaastaServer, FunctionInvoker, SERVER, sanitize_function_name}
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "server")]
-#[command(about = "Faasta KVM HTTP Function Server", long_about = None)]
+#[command(about = "Faasta WASI HTTP Function Server", long_about = None)]
 struct Args {
     /// Address to listen on (e.g., 0.0.0.0:443)
     #[arg(short, long, env = "LISTEN_ADDR", default_value = "0.0.0.0:443")]
@@ -69,13 +69,9 @@ struct Args {
     #[arg(long, env = "DB_PATH", default_value = "./data/db")]
     db_path: PathBuf,
 
-    /// Path to the functions directory containing uploaded shared objects
+    /// Path to the functions directory containing uploaded WASI components
     #[arg(long, env = "FUNCTIONS_PATH", default_value = "./functions")]
     functions_path: PathBuf,
-
-    /// Function execution backend.
-    #[arg(long, env = "FAASTA_FUNCTION_RUNTIME", default_value = "auto")]
-    function_runtime: FunctionRuntime,
 
     /// Address for the RPC server (QUIC)
     #[arg(long, env = "RPC_PATH", default_value = "/rpc")]
@@ -84,12 +80,6 @@ struct Args {
     /// Auto-generate TLS certificate using Porkbun
     #[arg(long, env = "AUTO_CERT", default_value = "false")]
     auto_cert: bool,
-}
-
-#[derive(clap::ValueEnum, Clone, Copy, Debug)]
-enum FunctionRuntime {
-    Auto,
-    Wasm,
 }
 
 #[derive(Clone)]
@@ -134,7 +124,7 @@ async fn main() -> Result<()> {
     }
 
     let metadata_db = Arc::new(Database::open(&args.db_path).context("failed to open sqlite db")?);
-    let invoker = build_function_invoker(args.function_runtime).await?;
+    let invoker = FunctionInvoker::wasm().await?;
 
     let server = Arc::new(
         FaastaServer::new(
@@ -181,18 +171,6 @@ async fn main() -> Result<()> {
         .serve(router.into_make_service())
         .await
         .context("https server error")
-}
-
-async fn build_function_invoker(runtime: FunctionRuntime) -> Result<FunctionInvoker> {
-    let runtime = match runtime {
-        FunctionRuntime::Auto => FunctionRuntime::Wasm,
-        explicit => explicit,
-    };
-
-    match runtime {
-        FunctionRuntime::Auto => unreachable!("auto function runtime should be resolved"),
-        FunctionRuntime::Wasm => FunctionInvoker::wasm().await,
-    }
 }
 
 async fn run_http_redirect(addr: SocketAddr, target_domain: String) {

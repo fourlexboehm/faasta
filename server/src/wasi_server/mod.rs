@@ -57,23 +57,12 @@ impl FaastaServer {
     }
 
     pub fn artifact_path(&self, function_name: &str) -> PathBuf {
-        self.artifact_candidates(function_name)
-            .into_iter()
-            .find(|path| path.exists())
-            .unwrap_or_else(|| self.functions_dir.join(format!("{function_name}.wasm")))
-    }
-
-    fn artifact_candidates(&self, function_name: &str) -> Vec<PathBuf> {
-        let mut candidates = vec![
-            self.functions_dir.join(format!("{function_name}.wasm")),
-            self.functions_dir.join(format!("{function_name}.cwasm")),
-            self.functions_dir.join(format!("{function_name}.so")),
-        ];
-        if cfg!(target_os = "macos") {
-            candidates.push(self.functions_dir.join(format!("{function_name}.dylib")));
-            candidates.push(self.functions_dir.join(format!("lib{function_name}.dylib")));
+        let wasm = self.functions_dir.join(format!("{function_name}.wasm"));
+        if wasm.exists() {
+            wasm
+        } else {
+            self.functions_dir.join(format!("{function_name}.cwasm"))
         }
-        candidates
     }
 
     fn ensure_exists(path: &Path) -> Result<()> {

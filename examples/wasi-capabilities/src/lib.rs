@@ -1,19 +1,8 @@
-use omnia_sdk::{BlobStore, StateStore, TableStore, anyhow};
-use omnia_wasi_sql::DataType;
+use faasta::blob::Blobs;
+use faasta::http::Json;
+use faasta::kv::Kv;
+use faasta::sql::Sql;
 use serde::Serialize;
-use wasip3::http::types::{ErrorCode, Fields, Request, Response};
-use wasip3::{wit_bindgen, wit_future, wit_stream};
-
-wasip3::http::service::export!(CapabilitiesHttp);
-
-#[derive(Clone, Debug)]
-struct CapabilitiesProvider;
-
-impl StateStore for CapabilitiesProvider {}
-impl TableStore for CapabilitiesProvider {}
-impl BlobStore for CapabilitiesProvider {}
-
-struct CapabilitiesHttp;
 
 #[derive(Debug, Serialize)]
 struct CapabilityResponse {
@@ -25,114 +14,56 @@ struct CapabilityResponse {
     blob_objects: Vec<String>,
 }
 
-impl wasip3::exports::http::handler::Guest for CapabilitiesHttp {
-    async fn handle(_request: Request) -> Result<Response, ErrorCode> {
-        match run_capabilities().await {
-            Ok(response) => json_response(200, &response),
-            Err(err) => json_response(
-                500,
-                &serde_json::json!({
-                    "error": err.to_string(),
-                }),
-            ),
-        }
-    }
-}
-
-async fn run_capabilities() -> anyhow::Result<CapabilityResponse> {
-    let provider = CapabilitiesProvider;
+#[faasta::handler]
+async fn handle(kv: Kv, sql: Sql, blobs: Blobs) -> faasta::Result<Json<CapabilityResponse>> {
     let message = "hello from faasta wasi capabilities".to_string();
+    let cache = kv.bucket("cache");
 
-    let previous_message = StateStore::get(&provider, "last-message")
+    let previous_message = cache
+        .get("last-message")
         .await?
         .and_then(|bytes| String::from_utf8(bytes).ok());
 
-    provider
-        .set("last-message", message.as_bytes(), None)
-        .await?;
+    cache.set("last-message", message.as_bytes()).await?;
 
-    let kv_roundtrip = StateStore::get(&provider, "last-message")
+    let kv_roundtrip = cache
+        .get("last-message")
         .await?
         .and_then(|bytes| String::from_utf8(bytes).ok());
 
-    provider
-        .exec(
-            "default".to_string(),
-            "CREATE TABLE IF NOT EXISTS capability_hits (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                message TEXT NOT NULL
-            )"
-            .to_string(),
-            Vec::new(),
-        )
+    sql.exec(
+        "CREATE TABLE IF NOT EXISTS capability_hits (
+            message TEXT NOT NULL
+        )",
+        (),
+    )
+    .await?;
+
+    sql.exec(
+        "INSERT INTO capability_hits(message) VALUES (?)",
+        (message.clone(),),
+    )
+    .await?;
+
+    let rows = sql
+        .query("SELECT message FROM capability_hits LIMIT 10", ())
         .await?;
 
-    provider
-        .exec(
-            "default".to_string(),
-            "INSERT INTO capability_hits(message) VALUES (?)".to_string(),
-            vec![DataType::Str(Some(message.clone()))],
-        )
+    let container = blobs.container("capability-demo");
+    container.create_if_missing().await?;
+    container
+        .put("last-message.txt", message.as_bytes())
         .await?;
 
-    let rows = provider
-        .query(
-            "default".to_string(),
-            "SELECT id, message FROM capability_hits ORDER BY id DESC LIMIT 10".to_string(),
-            Vec::new(),
-        )
-        .await?;
+    let blob = container.get("last-message.txt").await?.unwrap_or_default();
+    let blob_objects = container.list().await?;
 
-    let container = "capability-demo";
-    if !provider.container_exists(container).await? {
-        provider.create_container(container).await?;
-    }
-
-    provider
-        .put(container, "last-message.txt", message.as_bytes())
-        .await?;
-
-    let blob = BlobStore::get(&provider, container, "last-message.txt")
-        .await?
-        .unwrap_or_default();
-    let blob_objects = provider.list(container).await?;
-
-    Ok(CapabilityResponse {
+    Ok(Json(CapabilityResponse {
         message,
         previous_message,
         kv_roundtrip,
         sql_rows: rows.len(),
         blob_bytes: blob.len(),
         blob_objects,
-    })
-}
-
-fn json_response<T>(status: u16, value: &T) -> Result<Response, ErrorCode>
-where
-    T: Serialize,
-{
-    let body = serde_json::to_vec(value)
-        .map_err(|err| ErrorCode::InternalError(Some(format!("serializing response: {err}"))))?;
-    let headers = Fields::new();
-    headers
-        .set("content-type", &[b"application/json".to_vec()])
-        .map_err(|err| ErrorCode::InternalError(Some(format!("setting header: {err:?}"))))?;
-    headers
-        .set("content-length", &[body.len().to_string().into_bytes()])
-        .map_err(|err| ErrorCode::InternalError(Some(format!("setting header: {err:?}"))))?;
-
-    let (mut body_tx, body_rx) = wit_stream::new();
-    let (body_result_tx, body_result_rx) = wit_future::new(|| Ok(None));
-    let (response, _response_result) = Response::new(headers, Some(body_rx), body_result_rx);
-    response
-        .set_status_code(status)
-        .map_err(|()| ErrorCode::InternalError(Some("setting status code".to_string())))?;
-    drop(body_result_tx);
-
-    wit_bindgen::spawn(async move {
-        let remaining = body_tx.write_all(body).await;
-        assert!(remaining.is_empty());
-    });
-
-    Ok(response)
+    }))
 }

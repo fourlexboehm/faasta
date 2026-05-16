@@ -1,22 +1,16 @@
 # Faasta Examples
 
-This directory contains example applications demonstrating the use of Faasta with different frameworks and libraries.
+This directory contains example applications demonstrating Faasta WASI components.
 
 ## Available Examples
 
-### Waki HTTP Client and Server
+### WASIp3 Capabilities
 
-The [waki](./waki) directory contains examples demonstrating the use of the [waki](https://crates.io/crates/waki) library for both HTTP client and server applications. It includes:
+The [wasi-capabilities](./wasi-capabilities) directory contains a JSON API example that uses injected SQL, KV, and blob storage.
 
-- A Faasta macro-based HTTP proxy example
+### WASIp3 HTML
 
-### Faasta Website
-
-The [faasta-website](./faasta-website) directory contains an example website built with Faasta.
-
-### Retirement Planner
-
-The [retirement](./retirement) directory contains an HTML app example that renders projections from query parameters.
+The [wasi-html](./wasi-html) directory contains an HTML page returned from an async WASIp3 handler.
 
 ## Running the Examples
 

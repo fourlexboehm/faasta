@@ -111,7 +111,7 @@ async fn main() {
             };
 
             // Get project information
-            let (target_directory, package_name, _) = match run::get_project_info() {
+            let (target_directory, package_name, package_root) = match run::get_project_info() {
                 Ok(info) => info,
                 Err(e) => {
                     spinner.finish_and_clear();
@@ -120,7 +120,17 @@ async fn main() {
                 }
             };
 
-            // Path to the shared library artifact
+            if args.artifact_path.is_none() {
+                spinner.set_message("Building WASIp3 component...");
+                if let Err(e) = run::build_project(&package_root) {
+                    spinner.finish_and_clear();
+                    eprintln!("Failed to build project: {e}");
+                    exit(1);
+                }
+                spinner.set_message("Deploying project...");
+            }
+
+            // Path to the WASIp3 component artifact.
             // Note: Rust compiler output converts hyphens to underscores in artifact names.
             let artifact_path = if let Some(explicit_path) = &args.artifact_path {
                 // User provided an explicit artifact path
@@ -130,17 +140,16 @@ async fn main() {
                 run::default_artifact_path(&target_directory, &package_name)
             };
 
-            // For explicit artifact paths, we'll use the filename without extension as the function name
-            // unless the user specified a function name
+            // For explicit artifact paths, use the filename without extension as the function name
+            // unless the user specified a function name.
             let function_name = if args.artifact_path.is_some() && args.function_name.is_some() {
                 // User provided both artifact path and function name - use the explicit function name
                 args.function_name.clone().unwrap()
             } else if args.artifact_path.is_some() {
-                // User provided artifact path but no function name - derive from filename
+                // User provided artifact path but no function name - derive from filename.
                 artifact_path
                     .file_stem()
                     .and_then(|s| s.to_str())
-                    .map(|s| s.trim_start_matches("lib").to_owned())
                     .map(|s| s.to_owned())
                     .unwrap_or_else(|| {
                         spinner.finish_and_clear();
@@ -160,29 +169,27 @@ async fn main() {
                 spinner.finish_and_clear();
                 if args.artifact_path.is_some() {
                     eprintln!(
-                        "Error: Could not find shared library artifact at: {}",
+                        "Error: Could not find component artifact at: {}",
                         artifact_path.display()
                     );
                 } else {
                     eprintln!(
-                        "Error: Could not find compiled shared library at: {}",
+                        "Error: Could not find compiled WASIp3 component at: {}",
                         artifact_path.display()
                     );
                     eprintln!("Options:");
-                    eprintln!(
-                        "  1. Run 'cargo faasta build' first with x86_64-unknown-linux-gnu target"
-                    );
+                    eprintln!("  1. Run 'cargo faasta build' first");
                     eprintln!("  2. Specify an explicit artifact path with --artifact-path");
                     eprintln!();
                     eprintln!(
                         "If your artifact file is in a non-standard location or has a different name, use:"
                     );
-                    eprintln!("  cargo faasta deploy --artifact-path PATH/TO/YOUR/FILE.so");
+                    eprintln!("  cargo faasta deploy --artifact-path PATH/TO/YOUR/FILE.wasm");
                 }
                 exit(1);
             }
 
-            // Read the shared library artifact
+            // Read the component artifact
             let artifact_data = match std::fs::read(&artifact_path) {
                 Ok(data) => {
                     // Check artifact size client-side as well (30MB max)
@@ -334,7 +341,7 @@ async fn main() {
                     }
                 };
 
-                // Path to the shared library artifact
+                // Path to the WASIp3 component artifact
                 // Note: Rust compiler output converts hyphens to underscores in artifact names.
                 let artifact_path = if let Some(explicit_path) = &build_args.artifact_path {
                     // User provided an explicit artifact path
@@ -344,8 +351,8 @@ async fn main() {
                     run::default_artifact_path(&target_directory, &package_name)
                 };
 
-                // For explicit artifact paths, we'll use the filename without extension as the function name
-                // unless the user specified a function name
+                // For explicit artifact paths, use the filename without extension as the function name
+                // unless the user specified a function name.
                 let function_name = match (
                     build_args.artifact_path.is_some(),
                     build_args.function_name.is_some(),
@@ -356,7 +363,6 @@ async fn main() {
                     (true, false) => artifact_path
                         .file_stem()
                         .and_then(|s| s.to_str())
-                        .map(|s| s.trim_start_matches("lib").to_owned())
                         .map(|s| s.to_owned())
                         .unwrap_or_else(|| {
                             spinner.finish_and_clear();
@@ -373,31 +379,29 @@ async fn main() {
                     spinner.finish_and_clear();
                     if build_args.artifact_path.is_some() {
                         eprintln!(
-                            "Error: Could not find shared library artifact at: {}",
+                            "Error: Could not find component artifact at: {}",
                             artifact_path.display()
                         );
                     } else {
                         eprintln!(
-                            "Error: Could not find compiled shared library at: {}",
+                            "Error: Could not find compiled WASIp3 component at: {}",
                             artifact_path.display()
                         );
                         eprintln!("Options:");
-                        eprintln!(
-                            "  1. Run 'cargo faasta build' first with x86_64-unknown-linux-gnu target"
-                        );
+                        eprintln!("  1. Run 'cargo faasta build' first");
                         eprintln!("  2. Specify an explicit artifact path with --artifact-path");
                         eprintln!();
                         eprintln!(
                             "If your artifact file is in a non-standard location or has a different name, use:"
                         );
                         eprintln!(
-                            "  cargo faasta build --deploy --artifact-path PATH/TO/YOUR/FILE.so"
+                            "  cargo faasta build --deploy --artifact-path PATH/TO/YOUR/FILE.wasm"
                         );
                     }
                     exit(1);
                 }
 
-                // Read the shared library artifact
+                // Read the component artifact
                 let artifact_data = match std::fs::read(&artifact_path) {
                     Ok(data) => {
                         // Check artifact size client-side as well (30MB max)
@@ -774,7 +778,7 @@ struct DeployArgs {
     #[arg(long)]
     skip_auth: bool,
 
-    /// Explicit path to compiled shared library artifact (overrides automatic detection)
+    /// Explicit path to compiled WASIp3 component artifact (overrides automatic detection)
     #[arg(long)]
     artifact_path: Option<String>,
 
@@ -793,7 +797,7 @@ struct BuildArgs {
     #[arg(short, long)]
     deploy: bool,
 
-    /// Explicit path to compiled shared library artifact (overrides automatic detection)
+    /// Explicit path to compiled WASIp3 component artifact (overrides automatic detection)
     #[arg(long)]
     artifact_path: Option<String>,
 

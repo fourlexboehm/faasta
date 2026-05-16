@@ -162,16 +162,17 @@ impl FunctionMetric {
     }
 }
 
-// Function to check if a function's native artifact exists
+// Function to check if a function's WASI component artifact exists.
 fn function_artifact_exists(function_name: &str) -> bool {
     // Get the functions directory from environment or use default
     let functions_dir =
         std::env::var("FUNCTIONS_PATH").unwrap_or_else(|_| "./functions".to_string());
 
-    let artifact_filename = format!("{function_name}.so");
-    let artifact_path = Path::new(&functions_dir).join(&artifact_filename);
-
-    artifact_path.exists()
+    ["wasm", "cwasm"].iter().any(|extension| {
+        Path::new(&functions_dir)
+            .join(format!("{function_name}.{extension}"))
+            .exists()
+    })
 }
 
 pub fn get_metrics() -> Metrics {

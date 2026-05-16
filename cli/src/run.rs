@@ -182,10 +182,12 @@ pub fn get_project_info() -> Result<(PathBuf, String, PathBuf), io::Error> {
     Ok((target_directory, package_name, current_dir))
 }
 
-/// Build the project for wasm32-wasip2 target
+pub const FAASTA_TARGET: &str = "wasm32-wasip3";
+
+/// Build the project as a WASIp3 component.
 pub fn build_project(package_root: &PathBuf) -> Result<(), io::Error> {
     let spinner = indicatif::ProgressBar::new_spinner();
-    spinner.set_message("Building optimized x86_64 binary...");
+    spinner.set_message("Building optimized WASIp3 component...");
     spinner.enable_steady_tick(std::time::Duration::from_millis(100));
 
     // Validate the project structure
@@ -197,48 +199,37 @@ pub fn build_project(package_root: &PathBuf) -> Result<(), io::Error> {
     }
 
     let status = std::process::Command::new("cargo")
-        .args([
-            "zigbuild",
-            "--release",
-            "--target",
-            "x86_64-unknown-linux-gnu",
-        ])
+        .args(["build", "--release", "--target", FAASTA_TARGET])
         .current_dir(package_root)
         .status()
         .unwrap_or_else(|e| {
             spinner.finish_and_clear();
-            eprintln!("Failed to run cargo zigbuild, did you install it?: {e}");
-            let _status = std::process::Command::new("cargo")
-                .args(["binstall", "cargo-zigbuild"])
-                .status()
-                .unwrap_or_else(|e| {
-                    eprintln!("Failed to run cargo binstall, did you install it?: {e}");
-                    std::process::Command::new("cargo")
-                        .args(["install", "cargo-zigbuild"])
-                        .status()
-                        .unwrap_or_else(|_e| std::process::exit(1))
-                });
+            eprintln!("Failed to run cargo build for {FAASTA_TARGET}: {e}");
             exit(1);
         });
 
     if !status.success() {
         spinner.finish_and_clear();
-        eprintln!("Build failed");
+        eprintln!("Build failed for target {FAASTA_TARGET}");
+        eprintln!("Install the target with:");
+        eprintln!("  rustup target add {FAASTA_TARGET}");
+        eprintln!(
+            "If your toolchain cannot build {FAASTA_TARGET} yet, use a nightly toolchain with WASIp3 support."
+        );
         exit(1);
     }
 
     spinner.finish_and_clear();
-    println!("✅ Build successful!");
+    println!("✅ WASIp3 component build successful!");
     Ok(())
 }
 
 pub fn default_artifact_path(target_directory: &StdPath, package_name: &str) -> PathBuf {
     let rust_compiled_name = package_name.replace('-', "_");
-    let so_filename = format!("lib{rust_compiled_name}.so");
     target_directory
-        .join("x86_64-unknown-linux-gnu")
+        .join(FAASTA_TARGET)
         .join("release")
-        .join(so_filename)
+        .join(format!("{rust_compiled_name}.wasm"))
 }
 
 // The function to handle the run command
@@ -256,18 +247,18 @@ pub async fn handle_run(port: u16) -> io::Result<()> {
     // Get the full shared-library path - use same logic as in deploy
     let artifact_path = default_artifact_path(&target_directory, &package_name);
 
-    // Ensure the shared library exists
+    // Ensure the component exists
     if !artifact_path.exists() {
         eprintln!(
-            "Error: Could not find compiled shared library at: {}",
+            "Error: Could not find compiled WASIp3 component at: {}",
             artifact_path.display()
         );
         eprintln!("Build seems to have failed or produced output in a different location.");
         exit(1);
     }
 
-    println!("Compiled shared library: {}", artifact_path.display());
-    eprintln!("Local run is currently unsupported for native .so functions.");
+    println!("Compiled WASIp3 component: {}", artifact_path.display());
+    eprintln!("Local run is currently unsupported for WASIp3 components.");
     eprintln!(
         "Deploy with 'cargo faasta deploy --artifact-path <path>' or run a Faasta server locally."
     );

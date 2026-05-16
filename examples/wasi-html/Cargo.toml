@@ -1,7 +1,7 @@
 [workspace]
 
 [package]
-name = "faasta-wasi-capabilities"
+name = "faasta-wasi-html"
 version = "0.1.0"
 edition = "2024"
 publish = false
@@ -11,7 +11,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 faasta = { path = "../../faasta" }
-serde = { version = "1", features = ["derive"] }
 
 [profile.release]
 lto = true

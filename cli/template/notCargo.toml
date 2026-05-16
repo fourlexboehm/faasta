@@ -7,11 +7,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-cap-async-std = { version = "3.4.2", features = ["tokio1"] }
-faasta-macros = "0.1.7"
-faasta-types = "0.1.0"
+faasta = "0.2.0"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-url = "2"
 
 [workspace]
