@@ -12,6 +12,10 @@ The [wasi-capabilities](./wasi-capabilities) directory contains a JSON API examp
 
 The [wasi-html](./wasi-html) directory contains an HTML page returned from an async WASIp3 handler.
 
+### Faasta Website
+
+The [faasta-website](./faasta-website) directory contains the current documentation/marketing site as a WASIp3 Faasta component.
+
 ## Running the Examples
 
 Each example directory contains its own README.md with specific instructions on how to build and run the example.
