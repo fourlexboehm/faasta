@@ -409,7 +409,7 @@ fn page() -> &'static str {
           <div>
             <p class="eyebrow">Rust functions as WASIp3 components</p>
             <h1>Ship small async services without building a platform.</h1>
-            <p class="lead">Faasta packages Rust handlers as <span class="inline-code">wasi:http/service</span> components, runs them with Wasmtime, and injects tenant-scoped SQL, KV, and blob storage at the host boundary.</p>
+            <p class="lead">Faasta packages Rust handlers as <span class="inline-code">wasi:http/service</span> components, runs them with Wasmtime, and wires tenant-scoped SQL, KV, and blob storage using the wasi-cloud-core capability model.</p>
             <div class="actions">
               <a class="button" href="#docs">Start with the SDK</a>
               <a class="button secondary" href="#storage">Storage model</a>
@@ -420,7 +420,7 @@ fn page() -> &'static str {
             <svg class="component-map" viewBox="0 0 640 520" role="img" aria-label="Faasta routes HTTP requests into a WASIp3 component with host capabilities">
               <rect x="36" y="42" width="568" height="436" rx="10" fill="#fffaf0" stroke="#1b241f" stroke-width="2"/>
               <rect x="72" y="82" width="180" height="72" rx="6" fill="#e8f1ec" stroke="#0e7a56" stroke-width="2"/>
-              <text x="95" y="126" fill="#19211d" font-size="24" font-family="ui-monospace, monospace">HTTP request</text>
+              <text x="108" y="126" fill="#19211d" font-size="19" font-family="ui-monospace, monospace">HTTP req</text>
               <path d="M252 118 L344 118" stroke="#19211d" stroke-width="3"/>
               <path d="M332 106 L348 118 L332 130" fill="none" stroke="#19211d" stroke-width="3"/>
               <rect x="352" y="74" width="216" height="88" rx="6" fill="#eef3fb" stroke="#2d5b8a" stroke-width="2"/>
@@ -445,7 +445,7 @@ fn page() -> &'static str {
         <div class="shell">
           <div class="section-head">
             <h2>The current model is component-first.</h2>
-            <p class="section-copy">No native shared libraries, no user-managed process wrappers. User code exports a WASIp3 HTTP service through the SDK macro, and the host owns routing, capability wiring, tenant isolation, and distributed backends.</p>
+            <p class="section-copy">No native shared libraries, no user-managed process wrappers. User code exports a WASIp3 HTTP service through the SDK macro, and the host owns routing, capability wiring, tenant isolation, and distributed backends. The capability surface follows wasi-cloud-core standards for SQL, key-value, and blob storage.</p>
           </div>
           <div class="grid">
             <article class="tile">
@@ -461,7 +461,7 @@ fn page() -> &'static str {
             <article class="tile">
               <div class="stripe"></div>
               <strong>Tenant-scoped storage</strong>
-              <p>Guests open simple names. Faasta maps those names to per-function SQL schemas, object prefixes, and key prefixes.</p>
+              <p>Guests open simple names from the wasi-cloud-core capability APIs. Faasta maps those names to per-function SQL schemas, object prefixes, and key prefixes.</p>
             </article>
           </div>
         </div>
@@ -537,7 +537,7 @@ async fn handle(kv: Kv, sql: Sql, blobs: Blobs) -&gt; faasta::Result&lt;Json&lt;
         <div class="shell">
           <div class="section-head">
             <h2>Backends without new guest APIs.</h2>
-            <p class="section-copy">Faasta keeps guest code stable while swapping host providers. Local development can stay simple; multi-node deployments point every server at the same Postgres, Garage/S3, and Valkey services.</p>
+            <p class="section-copy">Faasta keeps guest code stable while swapping host providers behind the wasi-cloud-core capability contracts. Local development can stay simple; multi-node deployments point every server at the same Postgres, Garage/S3, and Valkey services.</p>
           </div>
           <table class="matrix">
             <thead>

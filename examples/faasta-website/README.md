@@ -2,6 +2,8 @@
 
 This example is the current Faasta documentation/marketing site as a WASIp3-facing Faasta component.
 
+The copy describes Faasta as using wasi-cloud-core as the standards basis for host-provided SQL, KV, and blob capabilities.
+
 It uses the public SDK surface:
 
 ```rust
