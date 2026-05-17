@@ -15,17 +15,62 @@ fn page() -> &'static str {
     <meta name="description" content="Faasta runs Rust functions as WASIp3 HTTP components with simple injected SQL, KV, and blob storage.">
     <style>
       :root {
-        color-scheme: light;
+        color-scheme: light dark;
         --paper: #f6f3ea;
         --ink: #19211d;
         --muted: #5d6761;
         --line: #d8d0c0;
         --panel: #fffcf4;
+        --panel-soft: #fbf7ed;
+        --panel-warm: #f8f1df;
+        --lead: #354039;
+        --topbar: rgba(246, 243, 234, 0.92);
+        --soft-border: rgba(25, 33, 29, 0.12);
+        --softer-border: rgba(25, 33, 29, 0.1);
+        --track-border: rgba(25, 33, 29, 0.18);
+        --shadow: rgba(25, 33, 29, 0.14);
+        --button-ink: #fffaf0;
         --green: #0e7a56;
         --red: #b84232;
         --blue: #2d5b8a;
         --amber: #b7791f;
         --code: #17201c;
+        --code-ink: #f8f1df;
+        --accent-mint: #9fe1bf;
+        --diagram-shell: #fffaf0;
+        --diagram-request: #e8f1ec;
+        --diagram-handler: #eef3fb;
+        --diagram-capability: #f0eadf;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #101512;
+          --ink: #eef5ed;
+          --muted: #a8b8ad;
+          --line: #2d382f;
+          --panel: #171f1a;
+          --panel-soft: #131a16;
+          --panel-warm: #1d271f;
+          --lead: #c4d2c8;
+          --topbar: rgba(16, 21, 18, 0.92);
+          --soft-border: rgba(238, 245, 237, 0.14);
+          --softer-border: rgba(238, 245, 237, 0.1);
+          --track-border: rgba(238, 245, 237, 0.18);
+          --shadow: rgba(0, 0, 0, 0.34);
+          --button-ink: #101512;
+          --green: #38c68f;
+          --red: #ff7a66;
+          --blue: #7fb5f1;
+          --amber: #e1aa4f;
+          --code: #07100c;
+          --code-ink: #edf7ee;
+          --accent-mint: #82e8b3;
+          --diagram-shell: #141c17;
+          --diagram-request: #10271f;
+          --diagram-handler: #122235;
+          --diagram-capability: #1f261f;
+        }
       }
 
       * {
@@ -57,8 +102,8 @@ fn page() -> &'static str {
         position: sticky;
         top: 0;
         z-index: 10;
-        border-bottom: 1px solid rgba(25, 33, 29, 0.12);
-        background: rgba(246, 243, 234, 0.92);
+        border-bottom: 1px solid var(--soft-border);
+        background: var(--topbar);
         backdrop-filter: blur(16px);
       }
 
@@ -135,7 +180,7 @@ fn page() -> &'static str {
       .lead {
         margin: 24px 0 0;
         max-width: 690px;
-        color: #354039;
+        color: var(--lead);
         font-size: clamp(1.1rem, 2vw, 1.45rem);
         line-height: 1.55;
       }
@@ -184,7 +229,7 @@ fn page() -> &'static str {
         border: 1px solid var(--ink);
         border-radius: 6px;
         background: var(--ink);
-        color: #fffaf0;
+        color: var(--button-ink);
         font-weight: 720;
         text-decoration: none;
       }
@@ -195,10 +240,10 @@ fn page() -> &'static str {
       }
 
       .visual {
-        border: 1px solid #1c2822;
+        border: 1px solid var(--ink);
         border-radius: 8px;
         background: var(--panel);
-        box-shadow: 12px 12px 0 rgba(25, 33, 29, 0.14);
+        box-shadow: 12px 12px 0 var(--shadow);
         overflow: hidden;
       }
 
@@ -215,7 +260,7 @@ fn page() -> &'static str {
         display: block;
         width: 100%;
         height: auto;
-        background: #fbf7ed;
+        background: var(--panel-soft);
       }
 
       section {
@@ -325,17 +370,17 @@ fn page() -> &'static str {
         gap: 8px;
         min-height: 42px;
         align-items: center;
-        border: 1px solid rgba(25, 33, 29, 0.12);
+        border: 1px solid var(--soft-border);
         border-radius: 6px;
         padding: 8px;
-        background: #f8f1df;
+        background: var(--panel-warm);
       }
 
       .runtime-pill {
         border-radius: 5px;
         padding: 7px 9px;
-        background: #17201c;
-        color: #f8f1df;
+        background: var(--code);
+        color: var(--code-ink);
         font-size: 0.78rem;
         font-weight: 720;
       }
@@ -372,9 +417,9 @@ fn page() -> &'static str {
 
       .bar-track {
         height: 12px;
-        border: 1px solid rgba(25, 33, 29, 0.18);
+        border: 1px solid var(--track-border);
         border-radius: 999px;
-        background: #f8f1df;
+        background: var(--panel-warm);
         overflow: hidden;
       }
 
@@ -438,7 +483,7 @@ fn page() -> &'static str {
       .rail a {
         display: block;
         padding: 10px 0;
-        border-bottom: 1px solid rgba(25, 33, 29, 0.1);
+        border-bottom: 1px solid var(--softer-border);
         color: var(--muted);
         text-decoration: none;
       }
@@ -469,7 +514,7 @@ fn page() -> &'static str {
         overflow: auto;
         border-radius: 8px;
         background: var(--code);
-        color: #f8f1df;
+        color: var(--code-ink);
         padding: 18px;
         font-size: 0.92rem;
         line-height: 1.55;
@@ -481,9 +526,9 @@ fn page() -> &'static str {
 
       .inline-code {
         padding: 0.13rem 0.34rem;
-        border: 1px solid rgba(25, 33, 29, 0.12);
+        border: 1px solid var(--soft-border);
         border-radius: 4px;
-        background: rgba(255, 252, 244, 0.72);
+        background: var(--panel);
       }
 
       .matrix {
@@ -554,7 +599,7 @@ fn page() -> &'static str {
         }
 
         .visual {
-          box-shadow: 7px 7px 0 rgba(25, 33, 29, 0.14);
+          box-shadow: 7px 7px 0 var(--shadow);
         }
 
         section {
@@ -606,24 +651,24 @@ fn page() -> &'static str {
           <aside class="visual" aria-label="Faasta runtime diagram">
             <div class="visual-head"><span>request path</span><span>wasi:http/service</span></div>
             <svg class="component-map" viewBox="0 0 640 520" role="img" aria-label="Faasta routes HTTP requests into a WASIp3 component with host capabilities">
-              <rect x="36" y="42" width="568" height="436" rx="10" fill="#fffaf0" stroke="#1b241f" stroke-width="2"/>
-              <rect x="64" y="82" width="204" height="72" rx="6" fill="#e8f1ec" stroke="#0e7a56" stroke-width="2"/>
-              <text x="92" y="126" fill="#19211d" font-size="18" font-family="ui-monospace, monospace">HTTP request</text>
-              <path d="M268 118 L344 118" stroke="#19211d" stroke-width="3"/>
-              <path d="M332 106 L348 118 L332 130" fill="none" stroke="#19211d" stroke-width="3"/>
-              <rect x="352" y="74" width="216" height="88" rx="6" fill="#eef3fb" stroke="#2d5b8a" stroke-width="2"/>
-              <text x="382" y="111" fill="#19211d" font-size="22" font-family="ui-monospace, monospace">#[faasta::</text>
-              <text x="392" y="138" fill="#19211d" font-size="22" font-family="ui-monospace, monospace">handler]</text>
-              <rect x="92" y="222" width="456" height="104" rx="8" fill="#17201c"/>
-              <text x="122" y="263" fill="#f8f1df" font-size="21" font-family="ui-monospace, monospace">async fn handle(sql, kv, blobs)</text>
-              <text x="122" y="294" fill="#9fe1bf" font-size="21" font-family="ui-monospace, monospace">  -&gt; Result&lt;Html&lt;String&gt;&gt;</text>
-              <path d="M186 326 L186 378 M320 326 L320 378 M454 326 L454 378" stroke="#19211d" stroke-width="3"/>
-              <rect x="96" y="382" width="112" height="54" rx="6" fill="#f0eadf" stroke="#b7791f" stroke-width="2"/>
-              <rect x="264" y="382" width="112" height="54" rx="6" fill="#f0eadf" stroke="#b84232" stroke-width="2"/>
-              <rect x="424" y="382" width="112" height="54" rx="6" fill="#f0eadf" stroke="#0e7a56" stroke-width="2"/>
-              <text x="136" y="416" fill="#19211d" font-size="20" font-family="ui-monospace, monospace">SQL</text>
-              <text x="305" y="416" fill="#19211d" font-size="20" font-family="ui-monospace, monospace">KV</text>
-              <text x="455" y="416" fill="#19211d" font-size="20" font-family="ui-monospace, monospace">Blobs</text>
+              <rect x="36" y="42" width="568" height="436" rx="10" fill="var(--diagram-shell)" stroke="var(--ink)" stroke-width="2"/>
+              <rect x="64" y="82" width="204" height="72" rx="6" fill="var(--diagram-request)" stroke="var(--green)" stroke-width="2"/>
+              <text x="92" y="126" fill="var(--ink)" font-size="18" font-family="ui-monospace, monospace">HTTP request</text>
+              <path d="M268 118 L344 118" stroke="var(--ink)" stroke-width="3"/>
+              <path d="M332 106 L348 118 L332 130" fill="none" stroke="var(--ink)" stroke-width="3"/>
+              <rect x="352" y="74" width="216" height="88" rx="6" fill="var(--diagram-handler)" stroke="var(--blue)" stroke-width="2"/>
+              <text x="382" y="111" fill="var(--ink)" font-size="22" font-family="ui-monospace, monospace">#[faasta::</text>
+              <text x="392" y="138" fill="var(--ink)" font-size="22" font-family="ui-monospace, monospace">handler]</text>
+              <rect x="92" y="222" width="456" height="104" rx="8" fill="var(--code)"/>
+              <text x="122" y="263" fill="var(--code-ink)" font-size="21" font-family="ui-monospace, monospace">async fn handle(sql, kv, blobs)</text>
+              <text x="122" y="294" fill="var(--accent-mint)" font-size="21" font-family="ui-monospace, monospace">  -&gt; Result&lt;Html&lt;String&gt;&gt;</text>
+              <path d="M186 326 L186 378 M320 326 L320 378 M454 326 L454 378" stroke="var(--ink)" stroke-width="3"/>
+              <rect x="96" y="382" width="112" height="54" rx="6" fill="var(--diagram-capability)" stroke="var(--amber)" stroke-width="2"/>
+              <rect x="264" y="382" width="112" height="54" rx="6" fill="var(--diagram-capability)" stroke="var(--red)" stroke-width="2"/>
+              <rect x="424" y="382" width="112" height="54" rx="6" fill="var(--diagram-capability)" stroke="var(--green)" stroke-width="2"/>
+              <text x="136" y="416" fill="var(--ink)" font-size="20" font-family="ui-monospace, monospace">SQL</text>
+              <text x="305" y="416" fill="var(--ink)" font-size="20" font-family="ui-monospace, monospace">KV</text>
+              <text x="455" y="416" fill="var(--ink)" font-size="20" font-family="ui-monospace, monospace">Blobs</text>
             </svg>
           </aside>
         </div>
