@@ -73,7 +73,7 @@ struct Args {
     #[arg(long, env = "FUNCTIONS_PATH", default_value = "./functions")]
     functions_path: PathBuf,
 
-    /// Address for the RPC server (QUIC)
+    /// HTTP path for the bitRPC control plane
     #[arg(long, env = "RPC_PATH", default_value = "/rpc")]
     rpc_path: String,
 

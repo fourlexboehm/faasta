@@ -8,9 +8,22 @@ Type=simple
 User=faasta
 Group=faasta
 WorkingDirectory=/opt/faasta
-ExecStart=/bin/sh -lc 'exec /opt/faasta/kvmserver --cwd /opt/faasta --allow-read=/lib --allow-read=/usr/lib --allow-read=/etc/ssl --allow-read=/etc/resolv.conf --allow-read=/etc/hosts --allow-read=/etc/nsswitch.conf --allow-read=/etc/gai.conf --allow-write=/opt/faasta --allow-listen --allow-connect storage --1-to-1 /opt/faasta/faasta-server storage-vm --db-path ./data/db --metrics-db-path ./data/metrics ++ run /opt/faasta/faasta-server serve --base-domain faasta.lol'
+ExecStart=/opt/faasta/faasta-server \
+  --listen-addr 0.0.0.0:443 \
+  --http-listen-addr 0.0.0.0:80 \
+  --base-domain faasta.lol \
+  --db-path ./data/db \
+  --functions-path ./functions \
+  --certs-dir ./certs \
+  --tls-cert-path ./certs/cert.pem \
+  --tls-key-path ./certs/key.pem
 Restart=on-failure
 RestartSec=5
+
+# Bind privileged ports without running as root
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
 
 # Logging
 StandardOutput=append:/var/log/faasta.log
@@ -24,11 +37,12 @@ TimeoutStopSec=30
 # Security options
 ProtectSystem=full
 PrivateTmp=true
-ProtectHome=false
+ProtectHome=true
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 LockPersonality=true
+ReadWritePaths=/opt/faasta /var/log
 
 [Install]
 WantedBy=multi-user.target

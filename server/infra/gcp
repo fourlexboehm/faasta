@@ -1,9 +1,10 @@
-gcloud compute instances create kvm1 \
-                                         --zone=us-west1-b \
-                                         --machine-type=e2-micro \
-                                             --image-project=ubuntu-os-cloud \
-                                         --image-family=ubuntu-2204-lts \
-                                         --boot-disk-size=30GB \
-                                         --boot-disk-type=pd-standard \
-                                         --network-tier=STANDARD \
-                                         --enable-nested-virtualization
+# Example GCP VM for a self-hosted Faasta server (no nested virtualization required).
+gcloud compute instances create faasta1 \
+  --zone=us-west1-b \
+  --machine-type=e2-medium \
+  --image-project=ubuntu-os-cloud \
+  --image-family=ubuntu-2204-lts \
+  --boot-disk-size=30GB \
+  --boot-disk-type=pd-standard \
+  --network-tier=STANDARD \
+  --tags=http-server,https-server

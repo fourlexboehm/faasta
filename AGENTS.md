@@ -1,0 +1,1 @@
+always run cargo fmt and clippy on strongest mode and fix before retuning to user as complete
