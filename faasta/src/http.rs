@@ -1,6 +1,7 @@
 use serde::Serialize;
 use wasip3::http::types::{ErrorCode, Fields, Response};
-use wasip3::{wit_bindgen, wit_future, wit_stream};
+use wasip3::{wit_future, wit_stream};
+use wit_bindgen;
 
 pub struct Html<T>(pub T);
 pub struct Json<T>(pub T);
@@ -105,7 +106,7 @@ fn body_response(status: u16, content_type: &str, body: Vec<u8>) -> Result<Respo
         .map_err(|()| ErrorCode::InternalError(Some("setting status code".to_string())))?;
     drop(body_result_tx);
 
-    wit_bindgen::spawn(async move {
+    wit_bindgen::spawn_local(async move {
         let remaining = body_tx.write_all(body).await;
         assert!(remaining.is_empty());
     });

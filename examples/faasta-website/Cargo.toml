@@ -15,3 +15,9 @@ faasta = { path = "../../faasta" }
 [profile.release]
 lto = true
 strip = "symbols"
+
+# Mirror the workspace patch: omnia git deps need wrpc from git at the
+# revision omnia's own lockfile pins.
+[patch.crates-io]
+wrpc-transport = { git = "https://github.com/bytecodealliance/wrpc", rev = "68d2a8e0c306cfa960dc840fd8207bf8a1ec7270" }
+wrpc-wasmtime = { git = "https://github.com/bytecodealliance/wrpc", rev = "68d2a8e0c306cfa960dc840fd8207bf8a1ec7270" }

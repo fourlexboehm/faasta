@@ -10,17 +10,17 @@ use dashmap::DashMap;
 use futures_util::FutureExt;
 use http::{HeaderName, HeaderValue, Method, Request, Uri};
 use http_body_util::{BodyExt, Full};
-use omnia::{Backend, Host};
+use omnia::{Backend, Host, StoreView};
 use omnia_wasi_blobstore::{
     BlobstoreDefault, Container, ContainerMetadata, ObjectMetadata, WasiBlobstore,
     WasiBlobstoreCtx, WasiBlobstoreCtxView,
 };
 use omnia_wasi_keyvalue::{
-    Bucket, KeyValueDefault, WasiKeyValue, WasiKeyValueCtx, WasiKeyValueCtxView,
+    Bucket, Cas, KeyValueDefault, WasiKeyValue, WasiKeyValueCtx, WasiKeyValueCtxView,
 };
 use omnia_wasi_sql::{
-    Connection as SqlConnection, DataType, Field, Row, SqlDefault, WasiSql, WasiSqlCtx,
-    WasiSqlCtxView,
+    ConnectOptions as SqlConnectOptions, Connection as SqlConnection, DataType, Field, Row,
+    SqlDefault, WasiSql, WasiSqlCtx, WasiSqlCtxView,
 };
 use redis::AsyncCommands;
 use tokio_postgres::types::ToSql;
@@ -28,10 +28,10 @@ use tracing::debug;
 use wasmtime::component::{Component, Linker, ResourceTable};
 use wasmtime::{Config, Engine, OptLevel, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
-use wasmtime_wasi_http::WasiHttpCtx;
+use wasmtime_wasi_http::p3::Request as WasiHttpRequest;
 use wasmtime_wasi_http::p3::bindings::ServicePre;
 use wasmtime_wasi_http::p3::bindings::http::types::ErrorCode;
-use wasmtime_wasi_http::p3::{Request as WasiHttpRequest, WasiHttpCtxView, WasiHttpView};
+use wasmtime_wasi_http::{WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks, WasiHttpView};
 
 #[derive(Debug, Clone)]
 pub struct WireHeader {
@@ -56,6 +56,11 @@ pub struct WasmResponse {
 
 type RequestBody =
     http_body_util::combinators::MapErr<Full<Bytes>, fn(std::convert::Infallible) -> ErrorCode>;
+
+/// Default [`WasiHttpHooks`] implementation using all default hook behavior.
+struct DefaultHttpHooks;
+
+impl WasiHttpHooks for DefaultHttpHooks {}
 
 pub struct WasmFunctionRuntime {
     engine: Engine,
@@ -126,7 +131,7 @@ impl WasmFunctionRuntime {
             .instantiate_async(&mut store)
             .await
             .map_err(|err| anyhow!("failed to instantiate WASI HTTP service component: {err}"))?;
-        let (wasi_request, request_io) = WasiHttpRequest::from_http(request);
+        let (wasi_request, request_io) = WasiHttpRequest::from_http(&mut DefaultHttpHooks, request);
 
         store
             .run_concurrent(async |accessor| {
@@ -229,8 +234,8 @@ impl WasiHttpView for WasmRequestState {
     }
 }
 
-impl omnia_wasi_keyvalue::WasiKeyValueView for WasmRequestState {
-    fn keyvalue(&mut self) -> WasiKeyValueCtxView<'_> {
+impl StoreView<WasiKeyValue> for WasmRequestState {
+    fn view(&mut self) -> WasiKeyValueCtxView<'_> {
         WasiKeyValueCtxView {
             ctx: &mut self.keyvalue,
             table: &mut self.table,
@@ -238,8 +243,8 @@ impl omnia_wasi_keyvalue::WasiKeyValueView for WasmRequestState {
     }
 }
 
-impl omnia_wasi_blobstore::WasiBlobstoreView for WasmRequestState {
-    fn blobstore(&mut self) -> WasiBlobstoreCtxView<'_> {
+impl StoreView<WasiBlobstore> for WasmRequestState {
+    fn view(&mut self) -> WasiBlobstoreCtxView<'_> {
         WasiBlobstoreCtxView {
             ctx: &mut self.blobstore,
             table: &mut self.table,
@@ -247,8 +252,8 @@ impl omnia_wasi_blobstore::WasiBlobstoreView for WasmRequestState {
     }
 }
 
-impl omnia_wasi_sql::WasiSqlView for WasmRequestState {
-    fn sql(&mut self) -> WasiSqlCtxView<'_> {
+impl StoreView<WasiSql> for WasmRequestState {
+    fn view(&mut self) -> WasiSqlCtxView<'_> {
         WasiSqlCtxView {
             ctx: &mut self.sql,
             table: &mut self.table,
@@ -389,7 +394,7 @@ impl SqlProvider {
                     std::fs::create_dir_all(parent)
                         .with_context(|| format!("failed to create WASI SQL parent {parent:?}"))?;
                 }
-                let sql = SqlDefault::connect_with(omnia_wasi_sql::default_impl::ConnectOptions {
+                let sql = SqlDefault::connect_with(SqlConnectOptions {
                     database: path.to_string_lossy().into_owned(),
                 })
                 .await
@@ -459,7 +464,7 @@ impl WasiKeyValueCtx for TenantKeyValue {
             match inner {
                 KeyValueProvider::Memory(memory) => {
                     let bucket = memory.open_bucket(host_name).await?;
-                    Ok(Arc::new(TenantBucket { guest_name, bucket }) as Arc<dyn Bucket>)
+                    Ok(Arc::new(TenantBucket { bucket }) as Arc<dyn Bucket>)
                 }
                 KeyValueProvider::Valkey(valkey) => Ok(Arc::new(ValkeyBucket {
                     guest_name,
@@ -474,15 +479,10 @@ impl WasiKeyValueCtx for TenantKeyValue {
 
 #[derive(Clone, Debug)]
 struct TenantBucket {
-    guest_name: String,
     bucket: Arc<dyn Bucket>,
 }
 
 impl Bucket for TenantBucket {
-    fn name(&self) -> &'static str {
-        Box::leak(self.guest_name.clone().into_boxed_str())
-    }
-
     fn get(&self, key: String) -> omnia::FutureResult<Option<Vec<u8>>> {
         self.bucket.get(key)
     }
@@ -501,6 +501,14 @@ impl Bucket for TenantBucket {
 
     fn keys(&self) -> omnia::FutureResult<Vec<String>> {
         self.bucket.keys()
+    }
+
+    fn increment(&self, key: String, delta: i64) -> omnia::FutureResult<i64> {
+        self.bucket.increment(key, delta)
+    }
+
+    fn swap(&self, cas: Cas, value: Vec<u8>) -> omnia::FutureResult<Result<(), Cas>> {
+        self.bucket.swap(cas, value)
     }
 }
 
@@ -626,11 +634,11 @@ impl Container for TenantContainer {
         Ok(info)
     }
 
-    fn get_data(&self, name: String, start: u64, end: u64) -> omnia::FutureResult<Option<Vec<u8>>> {
+    fn get_data(&self, name: String, start: u64, end: u64) -> omnia::FutureResult<Option<Bytes>> {
         self.container.get_data(name, start, end)
     }
 
-    fn write_data(&self, name: String, data: Vec<u8>) -> omnia::FutureResult<()> {
+    fn write_data(&self, name: String, data: Bytes) -> omnia::FutureResult<()> {
         self.container.write_data(name, data)
     }
 
@@ -720,10 +728,6 @@ impl ValkeyBucket {
 }
 
 impl Bucket for ValkeyBucket {
-    fn name(&self) -> &'static str {
-        Box::leak(self.guest_name.clone().into_boxed_str())
-    }
-
     fn get(&self, key: String) -> omnia::FutureResult<Option<Vec<u8>>> {
         let bucket = self.clone();
         async move {
@@ -772,6 +776,35 @@ impl Bucket for ValkeyBucket {
             let mut conn = bucket.valkey.connection().await?;
             let keys = conn.smembers(bucket.index_key()).await?;
             Ok(keys)
+        }
+        .boxed()
+    }
+
+    fn increment(&self, key: String, delta: i64) -> omnia::FutureResult<i64> {
+        let bucket = self.clone();
+        async move {
+            let mut conn = bucket.valkey.connection().await?;
+            let value: i64 = conn.incr(bucket.data_key(&key), delta).await?;
+            let _: usize = conn.sadd(bucket.index_key(), key).await?;
+            Ok(value)
+        }
+        .boxed()
+    }
+
+    fn swap(&self, cas: Cas, value: Vec<u8>) -> omnia::FutureResult<Result<(), Cas>> {
+        let bucket = self.clone();
+        async move {
+            let mut conn = bucket.valkey.connection().await?;
+            let current: Option<Vec<u8>> = conn.get(bucket.data_key(&cas.key)).await?;
+            if current != cas.current {
+                return Ok(Err(Cas {
+                    bucket: cas.bucket.clone(),
+                    key: cas.key.clone(),
+                    current,
+                }));
+            }
+            let _: () = conn.set(bucket.data_key(&cas.key), value).await?;
+            Ok(Ok(()))
         }
         .boxed()
     }
@@ -915,7 +948,7 @@ impl Container for S3Container {
         })
     }
 
-    fn get_data(&self, name: String, start: u64, end: u64) -> omnia::FutureResult<Option<Vec<u8>>> {
+    fn get_data(&self, name: String, start: u64, end: u64) -> omnia::FutureResult<Option<Bytes>> {
         let container = self.clone();
         async move {
             let mut request = container
@@ -929,7 +962,7 @@ impl Container for S3Container {
             }
             match request.send().await {
                 Ok(output) => {
-                    let bytes = output.body.collect().await?.into_bytes().to_vec();
+                    let bytes = output.body.collect().await?.into_bytes();
                     Ok(Some(bytes))
                 }
                 Err(err) if err.to_string().contains("NoSuchKey") => Ok(None),
@@ -939,7 +972,7 @@ impl Container for S3Container {
         .boxed()
     }
 
-    fn write_data(&self, name: String, data: Vec<u8>) -> omnia::FutureResult<()> {
+    fn write_data(&self, name: String, data: Bytes) -> omnia::FutureResult<()> {
         let container = self.clone();
         async move {
             container.ensure_marker().await?;
@@ -949,7 +982,7 @@ impl Container for S3Container {
                 .put_object()
                 .bucket(&container.store.bucket)
                 .key(container.object_key(&name))
-                .body(ByteStream::from(data))
+                .body(ByteStream::from(data.to_vec()))
                 .send()
                 .await
                 .context("failed to write S3 object")?;

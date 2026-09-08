@@ -13,5 +13,11 @@ exclude = ["function", "**/builds"]
 anyhow = "1.0.102"
 serde_json = "1.0.149"
 
+# omnia 0.36 (git) replaces this with a git dep; mirror it here so the
+# crates.io requirement resolves for downstream consumers.
+[patch.crates-io]
+wrpc-transport = { git = "https://github.com/bytecodealliance/wrpc", rev = "68d2a8e0c306cfa960dc840fd8207bf8a1ec7270" }
+wrpc-wasmtime = { git = "https://github.com/bytecodealliance/wrpc", rev = "68d2a8e0c306cfa960dc840fd8207bf8a1ec7270" }
+
 [workspace.metadata.hackerman]
 lock = true

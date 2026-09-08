@@ -26,12 +26,14 @@ hyper = { version = "1", features = ["full"] }
 hyper-util = { version = "0.1", features = ["full"] }
 lazy_static = "1"
 once_cell = "1"
-omnia = "0.31.0"
-omnia-wasi-blobstore = "0.31.0"
-omnia-wasi-keyvalue = "0.31.0"
-omnia-wasi-sql = "0.31.0"
+# Pinned to git main (0.36.0, wasmtime 48) until published: no crates.io
+# omnia release newer than 0.34 supports wasmtime 48.
+omnia = { git = "https://github.com/augentic/omnia", rev = "c8af06a3920c871618be24633ca6cc31441c8d39" }
+omnia-wasi-blobstore = { git = "https://github.com/augentic/omnia", rev = "c8af06a3920c871618be24633ca6cc31441c8d39" }
+omnia-wasi-keyvalue = { git = "https://github.com/augentic/omnia", rev = "c8af06a3920c871618be24633ca6cc31441c8d39" }
+omnia-wasi-sql = { git = "https://github.com/augentic/omnia", rev = "c8af06a3920c871618be24633ca6cc31441c8d39" }
 redis = { version = "1.2.1", features = ["aio", "tokio-comp", "connection-manager", "cluster-async"] }
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rustls = { version = "0.23.37", features = ["ring"] }
 rustls-pemfile = "2"
@@ -43,9 +45,9 @@ tower = { version = "0.5", features = ["timeout"] }
 tower-http = { version = "0.6", features = ["catch-panic", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-wasmtime = "44.0.1"
-wasmtime-wasi = { version = "44.0.1", features = ["p3"] }
-wasmtime-wasi-http = { version = "44.0.1", default-features = false, features = ["default-send-request", "p3", "component-model-async"] }
+wasmtime = "48.0.1"
+wasmtime-wasi = { version = "48.0.1", features = ["p3"] }
+wasmtime-wasi-http = { version = "48.0.1", default-features = false, features = ["default-send-request", "p3", "component-model-async"] }
 x509-parser = "0.18.1"
 
 [[bin]]

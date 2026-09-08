@@ -314,7 +314,10 @@ async fn function_dispatch(
         .headers()
         .get(header::HOST)
         .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
+        .map(str::to_owned)
+        // HTTP/2 requests carry authority in `:authority`, not the Host
+        // header, so fall back to the request URI's host if present.
+        .or_else(|| request.uri().host().map(str::to_owned));
     let host_ref = host_string.as_deref();
     let method = request.method().clone();
     let uri = request.uri().clone();
