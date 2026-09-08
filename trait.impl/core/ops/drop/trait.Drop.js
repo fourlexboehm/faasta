@@ -1,5 +1,5 @@
 (function() {
-    const implementors = Object.fromEntries([["faasta_server",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.95.0/core/ops/drop/trait.Drop.html\" title=\"trait core::ops::drop::Drop\">Drop</a> for <a class=\"struct\" href=\"faasta_server/metrics/struct.Timer.html\" title=\"struct faasta_server::metrics::Timer\">Timer</a>",0]]]]);
+    const implementors = Object.fromEntries([["faasta_server",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.98.1/core/ops/drop/trait.Drop.html\" title=\"trait core::ops::drop::Drop\">Drop</a> for <a class=\"struct\" href=\"faasta_server/metrics/struct.Timer.html\" title=\"struct faasta_server::metrics::Timer\">Timer</a>",0]]]]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {
