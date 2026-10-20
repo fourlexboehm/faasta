@@ -6,8 +6,9 @@ description = "bitrpc types for the faasta serverless platform"
 license = "MIT"
 
 [dependencies]
+# Bincode 3.0.0 is a compile-error retirement placeholder; 2.0.1 is the latest usable release.
 bincode = "2.0.1"
-bitrpc = "0.4"
+bitrpc = "0.4.0"
 bitcode = "0.6.9"
-serde = { version = "1.0", features = ["derive"] }
-thiserror = "2.0"
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"

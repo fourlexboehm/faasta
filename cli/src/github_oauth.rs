@@ -199,7 +199,7 @@ fn wait_for_callback(server: Server, csrf_state: &CsrfToken) -> Result<String> {
 
 /// Gets the GitHub username from the user's profile
 async fn get_github_username(token: &str) -> Result<String> {
-    let user: GitHubUser = HttpClient::new()
+    let user: GitHubUser = HttpClient::new()?
         .get("https://api.github.com/user")?
         .header("User-Agent", "faasta-cli")?
         .header("Authorization", format!("Bearer {token}"))?
@@ -221,7 +221,7 @@ async fn cyper_async_http_client(
         outbound_headers.append(name.clone(), value.clone());
     }
 
-    let response = HttpClient::new()
+    let response = HttpClient::new()?
         .request(method, request.uri().to_string())?
         .headers(outbound_headers)
         .body(request.body().clone())

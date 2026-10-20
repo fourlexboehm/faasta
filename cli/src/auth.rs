@@ -148,7 +148,7 @@ impl GitHubAuth {
         }
 
         // Create authenticated client
-        let response = HttpClient::new()
+        let response = HttpClient::new()?
             .get("https://api.github.com/app")?
             .headers(header)
             .send()

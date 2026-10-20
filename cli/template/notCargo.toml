@@ -8,6 +8,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 faasta = "0.2.0"
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
 
 [workspace]

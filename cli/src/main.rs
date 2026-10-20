@@ -924,7 +924,7 @@ async fn invoke_function(name: &str, arg: &str) -> anyhow::Result<()> {
     println!("Invoking function at: {invoke_url}");
 
     // Create a client using default TLS verification
-    let client = HttpClient::new();
+    let client = HttpClient::new()?;
 
     // Make sure we're using HTTPS
     let https_url = if !invoke_url.starts_with("https://") && !invoke_url.starts_with("http://") {

@@ -6,8 +6,8 @@ license = "MIT"
 description = "Proc macros for Faasta"
 
 [dependencies]
-quote = "1"
-syn = { version = "2", features = ["full", "visit"] }
+quote = "1.0.47"
+syn = { version = "3.0.9", features = ["full", "visit"] }
 
 [features]
 default = []
