@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["CONFIG_FILE","USER_AGENT"],"struct":["AuthConfig","GitHubAuth"]};
+window.SIDEBAR_ITEMS = {"constant":["CONFIG_FILE","MACHINE_MAN_PREVIEW","TOKEN_REFRESH_INTERVAL","USER_AGENT"],"fn":["fetch_installation_token"],"struct":["AuthConfig","GitHubAuth","GithubAuthParams","InstallationAccessToken","JwtClaims","RawInstallationAccessToken"]};
