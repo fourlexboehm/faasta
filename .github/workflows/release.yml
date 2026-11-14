@@ -16,7 +16,7 @@ jobs:
           - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             artifact_prefix: faasta-linux-arm64
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             artifact_prefix: faasta-macos-arm64
     
