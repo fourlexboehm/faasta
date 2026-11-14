@@ -6,7 +6,10 @@ autobins = false
 
 [dependencies]
 anyhow = "1.0.104"
-aws-sdk-s3 = "1.152.0"
+# The default `rustls` feature pulls the legacy rustls 0.21 stack, which
+# includes the vulnerable rustls-webpki 0.101 release. Use the modern
+# hyper-1/rustls-0.23 HTTPS client instead.
+aws-sdk-s3 = { version = "1.152.0", default-features = false, features = ["default-https-client", "http-1x", "rt-tokio"] }
 axum = { version = "0.8.9", features = ["macros", "multipart"] }
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 # Bincode 3.0.0 is a compile-error retirement placeholder; 2.0.1 is the latest usable release.

@@ -18,8 +18,8 @@ compio-driver = { version = "0.12.5", features = ["io-uring"] }
 cyper = { version = "0.9.0", features = ["json", "rustls"] }
 dirs = "7.0.0"
 faasta-interface = { path = "../interface", version = "0.2.0" }
-github-app-auth = "3.0.1"
 http = "1.5.0"
+jsonwebtoken = { version = "10.3.0", default-features = false, features = ["rust_crypto", "use_pem"] }
 indicatif = "0.18.6"
 oauth2 = { version = "5.0.0", default-features = false }
 open = "5.4.4"

@@ -2,16 +2,109 @@ use anyhow::Error;
 use compio::buf::BufResult;
 use cyper::Client as HttpClient;
 use dirs::config_dir;
-use github_app_auth::{GithubAuthParams, InstallationAccessToken};
 use http::header::HeaderMap;
-use http::header::{HeaderName, HeaderValue};
+use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const CONFIG_FILE: &str = "faasta/github_auth.json";
 const USER_AGENT: &str = "faasta-cli";
+const MACHINE_MAN_PREVIEW: &str = "application/vnd.github.machine-man-preview+json";
+/// Installation access tokens expire after an hour; refresh a little early.
+const TOKEN_REFRESH_INTERVAL: Duration = Duration::from_secs(55 * 60);
+
+#[derive(Debug, Serialize)]
+struct JwtClaims {
+    iat: u64,
+    exp: u64,
+    iss: u64,
+}
+
+#[derive(Clone)]
+struct GithubAuthParams {
+    user_agent: String,
+    private_key: Vec<u8>,
+    app_id: u64,
+    installation_id: u64,
+}
+
+#[derive(Deserialize)]
+struct RawInstallationAccessToken {
+    token: String,
+}
+
+/// GitHub app installation token, refreshed automatically before it expires.
+struct InstallationAccessToken {
+    token: String,
+    refresh_at: Instant,
+    params: GithubAuthParams,
+}
+
+impl InstallationAccessToken {
+    async fn new(params: GithubAuthParams) -> Result<Self, Error> {
+        let raw = fetch_installation_token(&params).await?;
+        Ok(Self {
+            token: raw.token,
+            refresh_at: Instant::now() + TOKEN_REFRESH_INTERVAL,
+            params,
+        })
+    }
+
+    async fn header(&mut self) -> Result<HeaderMap, Error> {
+        if Instant::now() >= self.refresh_at {
+            let raw = fetch_installation_token(&self.params).await?;
+            self.token = raw.token;
+            self.refresh_at = Instant::now() + TOKEN_REFRESH_INTERVAL;
+        }
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::AUTHORIZATION,
+            format!("token {}", self.token).parse()?,
+        );
+        Ok(headers)
+    }
+}
+
+async fn fetch_installation_token(
+    params: &GithubAuthParams,
+) -> Result<RawInstallationAccessToken, Error> {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    let claims = JwtClaims {
+        iat: now,
+        exp: now + 60,
+        iss: params.app_id,
+    };
+    let header = Header {
+        alg: Algorithm::RS256,
+        ..Default::default()
+    };
+    let key = EncodingKey::from_rsa_pem(&params.private_key)?;
+    let jwt = jsonwebtoken::encode(&header, &claims, &key)?;
+
+    let url = format!(
+        "https://api.github.com/app/installations/{}/access_tokens",
+        params.installation_id
+    );
+    let response = HttpClient::new()?
+        .post(&url)?
+        .bearer_auth(jwt)?
+        .header("Accept", MACHINE_MAN_PREVIEW)?
+        .header("User-Agent", params.user_agent.as_str())?
+        .send()
+        .await?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("GitHub installation token request failed ({status}): {body}");
+    }
+
+    Ok(response.json().await?)
+}
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct AuthConfig {
@@ -77,16 +170,7 @@ impl GitHubAuth {
             self.authenticate().await?;
         }
 
-        // Retrieve the OAuth2 header map and convert to an HTTP header map
-        let oauth_headers = self.token.as_mut().unwrap().header().await?;
-        let mut headers = HeaderMap::new();
-        for (name, value) in oauth_headers.iter() {
-            // Convert header name and value into http types
-            let hn = HeaderName::from_bytes(name.as_str().as_bytes())?;
-            let hv = HeaderValue::from_bytes(value.as_bytes())?;
-            headers.insert(hn, hv);
-        }
-        Ok(headers)
+        self.token.as_mut().unwrap().header().await
     }
 
     /// Store project HMAC for ownership verification
@@ -138,14 +222,7 @@ impl GitHubAuth {
 
     /// Get user ID from authenticated GitHub instance
     async fn fetch_and_store_user_id(&mut self) -> Result<(), Error> {
-        // Retrieve the underlying OAuth2 headers and convert to http HeaderMap
-        let oauth_headers = self.token.as_mut().unwrap().header().await?;
-        let mut header = HeaderMap::new();
-        for (name, value) in oauth_headers.iter() {
-            let hn = HeaderName::from_bytes(name.as_str().as_bytes())?;
-            let hv = HeaderValue::from_bytes(value.as_bytes())?;
-            header.insert(hn, hv);
-        }
+        let header = self.token.as_mut().unwrap().header().await?;
 
         // Create authenticated client
         let response = HttpClient::new()?
